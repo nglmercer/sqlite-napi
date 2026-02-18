@@ -4,11 +4,11 @@ use rusqlite::Row;
 use serde_json::{Number, Value};
 
 /// Convert SQLite row to JSON value with proper type handling
-/// 
+///
 /// # Arguments
 /// * `row` - Reference to the SQLite row
 /// * `i` - Column index
-/// 
+///
 /// # Returns
 /// JSON value representing the SQLite column value
 pub fn sqlite_to_json(row: &Row, i: usize) -> Value {

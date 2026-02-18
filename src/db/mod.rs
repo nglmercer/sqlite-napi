@@ -1,5 +1,5 @@
 //! Database module - provides SQLite database access via NAPI
-//! 
+//!
 //! This module is organized into sub-modules:
 //! - database: Database struct for creating connections
 //! - statement: Prepared statement handling

@@ -6,6 +6,7 @@ use crate::models::{QueryResult, TransactionResult};
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 use rusqlite::{Connection, ToSql};
+use std::io::Write;
 use std::sync::{Arc, Mutex};
 
 use super::Statement;
@@ -20,7 +21,7 @@ pub struct Database {
 #[napi]
 impl Database {
     /// Create a new Database connection
-    /// 
+    ///
     /// # Arguments
     /// * `path` - Path to SQLite database file, or ":memory:" for in-memory database
     #[napi(constructor)]
@@ -39,10 +40,10 @@ impl Database {
     }
 
     /// Prepare a SQL statement for execution
-    /// 
+    ///
     /// # Arguments
     /// * `sql` - SQL query string
-    /// 
+    ///
     /// # Returns
     /// A Statement object that can be used to execute the query
     #[napi]
@@ -60,11 +61,11 @@ impl Database {
     }
 
     /// Execute a SQL statement directly (without preparing)
-    /// 
+    ///
     /// # Arguments
     /// * `sql` - SQL statement to execute
     /// * `params` - Optional parameters for the statement
-    /// 
+    ///
     /// # Returns
     /// QueryResult with changes and last_insert_rowid
     #[napi]
@@ -87,10 +88,10 @@ impl Database {
     }
 
     /// Begin a transaction with the specified mode
-    /// 
+    ///
     /// # Arguments
     /// * `mode` - Transaction mode: "deferred" (default), "immediate", or "exclusive"
-    /// 
+    ///
     /// # Returns
     /// A Transaction object
     #[napi]
@@ -116,11 +117,11 @@ impl Database {
     }
 
     /// Execute within a transaction (convenience method)
-    /// 
+    ///
     /// # Arguments
     /// * `mode` - Transaction mode: "deferred" (default), "immediate", or "exclusive"
     /// * `sql_statements` - Vector of SQL statements to execute in the transaction
-    /// 
+    ///
     /// # Returns
     /// TransactionResult with changes and last_insert_rowid
     #[napi]
@@ -174,10 +175,10 @@ impl Database {
     }
 
     /// Execute SQL directly (without callback)
-    /// 
+    ///
     /// # Arguments
     /// * `sql` - SQL statement to execute
-    /// 
+    ///
     /// # Returns
     /// QueryResult with changes and last_insert_rowid
     #[napi]

@@ -4,10 +4,10 @@ use rusqlite::ToSql;
 use serde_json::Value;
 
 /// Convert JSON parameters to SQLite parameters
-/// 
+///
 /// # Arguments
 /// * `sql` - Slice of JSON values representing the parameters
-/// 
+///
 /// # Returns
 /// Vector of boxed traits that implement ToSql
 pub fn convert_params(sql: &[Value]) -> Vec<Box<dyn ToSql + Send>> {
@@ -15,11 +15,11 @@ pub fn convert_params(sql: &[Value]) -> Vec<Box<dyn ToSql + Send>> {
 }
 
 /// Convert JSON parameters with support for named parameters ($name, @name, :name) and positional (?1, ?)
-/// 
+///
 /// # Arguments
 /// * `sql` - The SQL string to check for parameter types
 /// * `params` - Slice of JSON values representing the parameters
-/// 
+///
 /// # Returns
 /// Vector of boxed traits that implement ToSql
 pub fn convert_params_with_named(sql: &str, params: &[Value]) -> Vec<Box<dyn ToSql + Send>> {
@@ -30,7 +30,7 @@ pub fn convert_params_with_named(sql: &str, params: &[Value]) -> Vec<Box<dyn ToS
     if has_named && params.len() == 1 {
         // If we have a single object with named parameters
         if let Value::Object(map) = &params[0] {
-            return map.values().map(|v| convert_single_param(v)).collect();
+            return map.values().map(convert_single_param).collect();
         }
     }
 
@@ -39,10 +39,10 @@ pub fn convert_params_with_named(sql: &str, params: &[Value]) -> Vec<Box<dyn ToS
 }
 
 /// Convert a single JSON value to a SQLite parameter
-/// 
+///
 /// # Arguments
 /// * `v` - JSON value to convert
-/// 
+///
 /// # Returns
 /// Boxed trait that implements ToSql
 pub fn convert_single_param(v: &Value) -> Box<dyn ToSql + Send> {

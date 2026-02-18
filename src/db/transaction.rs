@@ -34,7 +34,7 @@ impl Transaction {
 #[napi]
 impl Transaction {
     /// Commit the transaction
-    /// 
+    ///
     /// # Returns
     /// TransactionResult with changes and last_insert_rowid
     #[napi]
@@ -59,7 +59,7 @@ impl Transaction {
     }
 
     /// Rollback the transaction
-    /// 
+    ///
     /// # Returns
     /// TransactionResult with changes and last_insert_rowid
     #[napi]
@@ -87,10 +87,10 @@ impl Transaction {
     }
 
     /// Create a savepoint for nested transactions
-    /// 
+    ///
     /// # Arguments
     /// * `name` - Name for the savepoint
-    /// 
+    ///
     /// # Returns
     /// A new Transaction object representing the savepoint
     #[napi]

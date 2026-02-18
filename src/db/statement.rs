@@ -27,10 +27,10 @@ impl Statement {
 #[napi]
 impl Statement {
     /// Execute query and return all rows as objects
-    /// 
+    ///
     /// # Arguments
     /// * `params` - Optional parameters for the query
-    /// 
+    ///
     /// # Returns
     /// Vector of JSON objects representing each row
     #[napi]
@@ -41,11 +41,7 @@ impl Statement {
             .map_err(|_| Error::from_reason("DB Lock failed"))?;
         let mut stmt = conn.prepare(&self.sql).map_err(to_napi_error)?;
 
-        let column_names: Vec<String> = stmt
-            .column_names()
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
+        let column_names: Vec<String> = stmt.column_names().iter().map(|s| s.to_string()).collect();
         let rusqlite_params = convert_params_with_named(&self.sql, &params);
         let params_refs: Vec<&dyn ToSql> =
             rusqlite_params.iter().map(|p| p as &dyn ToSql).collect();
@@ -53,8 +49,8 @@ impl Statement {
         let rows = stmt
             .query_map(params_refs.as_slice(), |row| {
                 let mut map = Map::new();
-                for i in 0..column_names.len() {
-                    map.insert(column_names[i].clone(), sqlite_to_json(row, i));
+                for (i, name) in column_names.iter().enumerate() {
+                    map.insert(name.clone(), sqlite_to_json(row, i));
                 }
                 Ok(Value::Object(map))
             })
@@ -68,10 +64,10 @@ impl Statement {
     }
 
     /// Execute query and return first row as object
-    /// 
+    ///
     /// # Arguments
     /// * `params` - Optional parameters for the query
-    /// 
+    ///
     /// # Returns
     /// Optional JSON object representing the first row, or None if no rows
     #[napi]
@@ -82,11 +78,7 @@ impl Statement {
             .map_err(|_| Error::from_reason("DB Lock failed"))?;
         let mut stmt = conn.prepare(&self.sql).map_err(to_napi_error)?;
 
-        let column_names: Vec<String> = stmt
-            .column_names()
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
+        let column_names: Vec<String> = stmt.column_names().iter().map(|s| s.to_string()).collect();
         let rusqlite_params = convert_params_with_named(&self.sql, &params);
         let params_refs: Vec<&dyn ToSql> =
             rusqlite_params.iter().map(|p| p as &dyn ToSql).collect();
@@ -95,8 +87,8 @@ impl Statement {
 
         if let Some(row) = rows.next().map_err(to_napi_error)? {
             let mut map = Map::new();
-            for i in 0..column_names.len() {
-                map.insert(column_names[i].clone(), sqlite_to_json(row, i));
+            for (i, name) in column_names.iter().enumerate() {
+                map.insert(name.clone(), sqlite_to_json(row, i));
             }
             Ok(Some(Value::Object(map)))
         } else {
@@ -105,10 +97,10 @@ impl Statement {
     }
 
     /// Execute query and return metadata (changes, last_insert_rowid)
-    /// 
+    ///
     /// # Arguments
     /// * `params` - Optional parameters for the query
-    /// 
+    ///
     /// # Returns
     /// QueryResult with changes and last_insert_rowid
     #[napi]
@@ -134,10 +126,10 @@ impl Statement {
     }
 
     /// Execute query and return all rows as arrays (values)
-    /// 
+    ///
     /// # Arguments
     /// * `params` - Optional parameters for the query
-    /// 
+    ///
     /// # Returns
     /// Vector of arrays containing JSON values for each row
     #[napi]

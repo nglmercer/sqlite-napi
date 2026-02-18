@@ -20,6 +20,7 @@ pub struct Statement {
 #[napi]
 pub struct Transaction {
     conn: Arc<Mutex<Connection>>,
+    #[allow(dead_code)]
     committed: bool,
     savepoint_name: Option<String>,
 }
@@ -45,7 +46,10 @@ impl Database {
     pub fn query(&self, sql: String) -> Result<Statement> {
         // Validate SQL is preparable
         {
-            let conn = self.conn.lock().map_err(|_| Error::from_reason("DB Lock failed"))?;
+            let conn = self
+                .conn
+                .lock()
+                .map_err(|_| Error::from_reason("DB Lock failed"))?;
             conn.prepare(&sql).map_err(to_napi_error)?;
         }
 
@@ -57,7 +61,10 @@ impl Database {
 
     #[napi]
     pub fn run(&self, sql: String, params: Vec<serde_json::Value>) -> Result<QueryResult> {
-        let conn = self.conn.lock().map_err(|_| Error::from_reason("DB Lock failed"))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| Error::from_reason("DB Lock failed"))?;
         let rusqlite_params = convert_params(&params);
         let params_refs: Vec<&dyn ToSql> =
             rusqlite_params.iter().map(|p| p as &dyn ToSql).collect();
@@ -75,7 +82,10 @@ impl Database {
     /// Modes: "deferred" (default), "immediate", "exclusive"
     #[napi]
     pub fn transaction(&self, mode: Option<String>) -> Result<Transaction> {
-        let conn = self.conn.lock().map_err(|_| Error::from_reason("DB Lock failed"))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| Error::from_reason("DB Lock failed"))?;
 
         // Determine transaction mode
         let mode_str = match mode.as_deref() {
@@ -103,7 +113,10 @@ impl Database {
         mode: Option<String>,
         sql_statements: Vec<String>,
     ) -> Result<TransactionResult> {
-        let conn = self.conn.lock().map_err(|_| Error::from_reason("DB Lock failed"))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| Error::from_reason("DB Lock failed"))?;
 
         // Determine transaction mode
         let mode_str = match mode.as_deref() {
@@ -147,7 +160,10 @@ impl Database {
     /// Execute SQL within a transaction directly (without callback)
     #[napi]
     pub fn exec(&self, sql: String) -> Result<QueryResult> {
-        let conn = self.conn.lock().map_err(|_| Error::from_reason("DB Lock failed"))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| Error::from_reason("DB Lock failed"))?;
         conn.execute(&sql, []).map_err(to_napi_error)?;
         Ok(QueryResult {
             changes: conn.changes() as u32,
@@ -161,19 +177,16 @@ impl Statement {
     /// Execute query and return all rows as objects
     #[napi]
     pub fn all(&self, params: Vec<serde_json::Value>) -> Result<Vec<serde_json::Value>> {
-        let conn = self.conn.lock().map_err(|_| Error::from_reason("DB Lock failed"))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| Error::from_reason("DB Lock failed"))?;
         let mut stmt = conn.prepare(&self.sql).map_err(to_napi_error)?;
 
-        let column_names: Vec<String> = stmt
-            .column_names()
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
+        let column_names: Vec<String> = stmt.column_names().iter().map(|s| s.to_string()).collect();
         let rusqlite_params = convert_params_with_named(&self.sql, &params);
-        let params_refs: Vec<&dyn ToSql> = rusqlite_params
-            .iter()
-            .map(|p| p as &dyn ToSql)
-            .collect();
+        let params_refs: Vec<&dyn ToSql> =
+            rusqlite_params.iter().map(|p| p as &dyn ToSql).collect();
 
         let rows = stmt
             .query_map(params_refs.as_slice(), |row| {
@@ -195,23 +208,18 @@ impl Statement {
     /// Execute query and return first row as object
     #[napi]
     pub fn get(&self, params: Vec<serde_json::Value>) -> Result<Option<serde_json::Value>> {
-        let conn = self.conn.lock().map_err(|_| Error::from_reason("DB Lock failed"))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| Error::from_reason("DB Lock failed"))?;
         let mut stmt = conn.prepare(&self.sql).map_err(to_napi_error)?;
 
-        let column_names: Vec<String> = stmt
-            .column_names()
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
+        let column_names: Vec<String> = stmt.column_names().iter().map(|s| s.to_string()).collect();
         let rusqlite_params = convert_params_with_named(&self.sql, &params);
-        let params_refs: Vec<&dyn ToSql> = rusqlite_params
-            .iter()
-            .map(|p| p as &dyn ToSql)
-            .collect();
+        let params_refs: Vec<&dyn ToSql> =
+            rusqlite_params.iter().map(|p| p as &dyn ToSql).collect();
 
-        let mut rows = stmt
-            .query(params_refs.as_slice())
-            .map_err(to_napi_error)?;
+        let mut rows = stmt.query(params_refs.as_slice()).map_err(to_napi_error)?;
 
         if let Some(row) = rows.next().map_err(to_napi_error)? {
             let mut map = Map::new();
@@ -227,14 +235,15 @@ impl Statement {
     /// Execute query and return metadata (changes, last_insert_rowid)
     #[napi]
     pub fn run(&self, params: Vec<serde_json::Value>) -> Result<QueryResult> {
-        let conn = self.conn.lock().map_err(|_| Error::from_reason("DB Lock failed"))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| Error::from_reason("DB Lock failed"))?;
         let mut stmt = conn.prepare(&self.sql).map_err(to_napi_error)?;
 
         let rusqlite_params = convert_params_with_named(&self.sql, &params);
-        let params_refs: Vec<&dyn ToSql> = rusqlite_params
-            .iter()
-            .map(|p| p as &dyn ToSql)
-            .collect();
+        let params_refs: Vec<&dyn ToSql> =
+            rusqlite_params.iter().map(|p| p as &dyn ToSql).collect();
 
         let changes = stmt
             .execute(params_refs.as_slice())
@@ -249,19 +258,21 @@ impl Statement {
     /// Execute query and return all rows as arrays (values)
     #[napi]
     pub fn values(&self, params: Vec<serde_json::Value>) -> Result<Vec<Vec<serde_json::Value>>> {
-        let conn = self.conn.lock().map_err(|_| Error::from_reason("DB Lock failed"))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| Error::from_reason("DB Lock failed"))?;
         let mut stmt = conn.prepare(&self.sql).map_err(to_napi_error)?;
 
+        let column_count = stmt.column_count();
         let rusqlite_params = convert_params_with_named(&self.sql, &params);
-        let params_refs: Vec<&dyn ToSql> = rusqlite_params
-            .iter()
-            .map(|p| p as &dyn ToSql)
-            .collect();
+        let params_refs: Vec<&dyn ToSql> =
+            rusqlite_params.iter().map(|p| p as &dyn ToSql).collect();
 
         let rows = stmt
             .query_map(params_refs.as_slice(), |row| {
                 let mut values = Vec::new();
-                for i in 0..row.column_count() {
+                for i in 0..column_count {
                     values.push(sqlite_to_json(row, i));
                 }
                 Ok(values)
@@ -276,20 +287,89 @@ impl Statement {
     }
 }
 
+#[napi]
+impl Transaction {
+    /// Commit the transaction
+    #[napi]
+    pub fn commit(&self) -> Result<TransactionResult> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| Error::from_reason("DB Lock failed"))?;
+
+        // If this is a savepoint, release it; otherwise commit
+        if let Some(ref savepoint) = self.savepoint_name {
+            conn.execute(&format!("RELEASE SAVEPOINT {}", savepoint), [])
+                .map_err(to_napi_error)?;
+        } else {
+            conn.execute("COMMIT", []).map_err(to_napi_error)?;
+        }
+
+        Ok(TransactionResult {
+            changes: conn.changes() as u32,
+            last_insert_rowid: conn.last_insert_rowid(),
+        })
+    }
+
+    /// Rollback the transaction
+    #[napi]
+    pub fn rollback(&self) -> Result<TransactionResult> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| Error::from_reason("DB Lock failed"))?;
+
+        // If this is a savepoint, rollback to it; otherwise rollback the transaction
+        if let Some(ref savepoint) = self.savepoint_name {
+            conn.execute(&format!("ROLLBACK TO SAVEPOINT {}", savepoint), [])
+                .map_err(to_napi_error)?;
+            // Release the savepoint after rollback
+            conn.execute(&format!("RELEASE SAVEPOINT {}", savepoint), [])
+                .map_err(to_napi_error)?;
+        } else {
+            conn.execute("ROLLBACK", []).map_err(to_napi_error)?;
+        }
+
+        Ok(TransactionResult {
+            changes: conn.changes() as u32,
+            last_insert_rowid: conn.last_insert_rowid(),
+        })
+    }
+
+    /// Create a savepoint for nested transactions
+    #[napi]
+    pub fn savepoint(&self, name: String) -> Result<Transaction> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| Error::from_reason("DB Lock failed"))?;
+
+        conn.execute(&format!("SAVEPOINT {}", name), [])
+            .map_err(to_napi_error)?;
+
+        Ok(Transaction {
+            conn: self.conn.clone(),
+            committed: false,
+            savepoint_name: Some(name),
+        })
+    }
+}
+
 /// Convert SQLite row to JSON value with proper type handling
 fn sqlite_to_json(row: &rusqlite::Row, i: usize) -> Value {
     match row.get_ref(i) {
         Ok(rusqlite::types::ValueRef::Null) => Value::Null,
         Ok(rusqlite::types::ValueRef::Integer(i)) => Value::Number(i.into()),
-        Ok(rusqlite::types::ValueRef::Real(f)) => Value::Number(
-            serde_json::Number::from_f64(f).unwrap_or(serde_json::Number::from(0)),
-        ),
+        Ok(rusqlite::types::ValueRef::Real(f)) => {
+            Value::Number(serde_json::Number::from_f64(f).unwrap_or(serde_json::Number::from(0)))
+        }
         Ok(rusqlite::types::ValueRef::Text(t)) => {
             Value::String(String::from_utf8_lossy(t).into_owned())
         }
-        Ok(rusqlite::types::ValueRef::Blob(b)) => {
-            Value::String(base64::Engine::encode(&base64::engine::general_purpose::STANDARD, b))
-        }
+        Ok(rusqlite::types::ValueRef::Blob(b)) => Value::String(base64::Engine::encode(
+            &base64::engine::general_purpose::STANDARD,
+            b,
+        )),
         _ => Value::Null,
     }
 }
@@ -302,18 +382,13 @@ fn convert_params(sql: &[Value]) -> Vec<Box<dyn ToSql + Send>> {
 /// Convert JSON parameters with support for named parameters ($name, @name, :name) and positional (?1, ?)
 fn convert_params_with_named(sql: &str, params: &[Value]) -> Vec<Box<dyn ToSql + Send>> {
     // Check if SQL has named parameters
-    let has_named = sql.contains(':')
-        || sql.contains('$')
-        || sql.contains('@')
-        || sql.contains("?name");
+    let has_named =
+        sql.contains(':') || sql.contains('$') || sql.contains('@') || sql.contains("?name");
 
     if has_named && params.len() == 1 {
         // If we have a single object with named parameters
         if let Value::Object(map) = &params[0] {
-            return map
-                .values()
-                .map(|v| convert_single_param(v))
-                .collect();
+            return map.values().map(|v| convert_single_param(v)).collect();
         }
     }
 

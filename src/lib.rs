@@ -4,8 +4,8 @@ mod db;
 mod error;
 mod models;
 
-pub use db::Database;
-pub use models::QueryResult;
+pub use db::{Database, Statement, Transaction};
+pub use models::{QueryResult, TransactionResult};
 
 #[napi]
 pub fn get_sqlite_version() -> String {

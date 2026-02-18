@@ -2,28 +2,28 @@
 
 Goal: Build a high-performance SQLite library for Node.js/Bun that mirrors the `bun:sqlite` API as closely as possible.
 
-## Phase 1: Core API Parity (Current)
+## Phase 1: Core API Parity (Complete ✅)
 
 - [x] Initial project structure with `napi-rs`
 - [x] Basic `Database` class with connection management
 - [x] Basic synchronous execution (via `execute`)
-- [ ] Implement `database.query(sql)` returning a `Statement` object
-- [ ] Implement named and positional parameter support (`$name`, `?1`, etc.)
-- [ ] Implement `statement.all(params)` (returns all rows)
-- [ ] Implement `statement.get(params)` (returns first row)
-- [ ] Implement `statement.run(params)` (returns metadata like `changes`)
-- [ ] Implement `statement.values(params)` (returns rows as arrays)
+- [x] Implement `database.query(sql)` returning a `Statement` object
+- [x] Implement named and positional parameter support (`$name`, `?1`, etc.)
+- [x] Implement `statement.all(params)` (returns all rows)
+- [x] Implement `statement.get(params)` (returns first row)
+- [x] Implement `statement.run(params)` (returns metadata like `changes`)
+- [x] Implement `statement.values(params)` (returns rows as arrays)
 
-## Phase 2: Transaction Support
+## Phase 2: Transaction Support (Complete ✅)
 
-- [ ] Implement `database.transaction(callback)`
-- [ ] Support for nested transactions (Savepoints)
-- [ ] Ensure `deferred`, `immediate`, and `exclusive` transaction modes
+- [x] Implement `database.transaction(callback)` - returns Transaction object with commit/rollback
+- [x] Support for nested transactions (Savepoints) - via `transaction.savepoint(name)`
+- [x] Ensure `deferred`, `immediate`, and `exclusive` transaction modes
 
 ## Phase 3: Advanced Bun Features
 
 - [ ] Implement `database.loadExtension(path)`
-- [ ] Implement `database.serialize()` and `database.deserialize()` (In-memory back/restore)
+- [ ] Implement `database.serialize()` and `database.deserialize()` (In-memory back/restore)k
 - [ ] BLOB support: Automatic conversion to/from `Uint8Array`
 - [ ] `BigInt` support for 64-bit integers
 - [ ] Implement `statement.finalize()` and automatic cleanup

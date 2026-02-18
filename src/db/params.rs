@@ -1,69 +1,76 @@
-//! Params module - utilities for converting JSON parameters to SQLite parameters
+//! Params module - utilities for converting NAPI values to SQLite parameters
 
+use napi::bindgen_prelude::*;
+use rusqlite::types::{ToSqlOutput, ValueRef};
 use rusqlite::ToSql;
-use serde_json::Value;
 
-/// Convert JSON parameters to SQLite parameters
-///
-/// # Arguments
-/// * `sql` - Slice of JSON values representing the parameters
-///
-/// # Returns
-/// Vector of boxed traits that implement ToSql
-pub fn convert_params(sql: &[Value]) -> Vec<Box<dyn ToSql + Send>> {
-    sql.iter().map(convert_single_param).collect()
+pub enum Param {
+    Null,
+    Int(i64),
+    Float(f64),
+    Text(String),
+    Blob(Vec<u8>),
+    Bool(bool),
 }
 
-/// Convert JSON parameters with support for named parameters ($name, @name, :name) and positional (?1, ?)
-///
-/// # Arguments
-/// * `sql` - The SQL string to check for parameter types
-/// * `params` - Slice of JSON values representing the parameters
-///
-/// # Returns
-/// Vector of boxed traits that implement ToSql
-pub fn convert_params_with_named(sql: &str, params: &[Value]) -> Vec<Box<dyn ToSql + Send>> {
-    // Check if SQL has named parameters
-    let has_named =
-        sql.contains(':') || sql.contains('$') || sql.contains('@') || sql.contains("?name");
-
-    if has_named && params.len() == 1 {
-        // If we have a single object with named parameters
-        if let Value::Object(map) = &params[0] {
-            return map.values().map(convert_single_param).collect();
+impl ToSql for Param {
+    fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
+        match self {
+            Param::Null => Ok(ToSqlOutput::Borrowed(ValueRef::Null)),
+            Param::Int(i) => Ok(ToSqlOutput::Borrowed(ValueRef::Integer(*i))),
+            Param::Float(f) => Ok(ToSqlOutput::Borrowed(ValueRef::Real(*f))),
+            Param::Text(s) => Ok(ToSqlOutput::Borrowed(ValueRef::Text(s.as_bytes()))),
+            Param::Blob(b) => Ok(ToSqlOutput::Borrowed(ValueRef::Blob(b))),
+            Param::Bool(b) => Ok(ToSqlOutput::Borrowed(ValueRef::Integer(if *b { 1 } else { 0 }))),
         }
     }
-
-    // Otherwise, treat as positional parameters
-    params.iter().map(convert_single_param).collect()
 }
 
-/// Convert a single JSON value to a SQLite parameter
-///
-/// # Arguments
-/// * `v` - JSON value to convert
-///
-/// # Returns
-/// Boxed trait that implements ToSql
-pub fn convert_single_param(v: &Value) -> Box<dyn ToSql + Send> {
-    match v {
-        Value::Null => Box::new(rusqlite::types::Null) as Box<dyn ToSql + Send>,
-        Value::Bool(b) => Box::new(*b) as Box<dyn ToSql + Send>,
-        Value::Number(n) => {
-            if let Some(i) = n.as_i64() {
-                Box::new(i) as Box<dyn ToSql + Send>
+pub fn js_to_param(val: &Unknown) -> Result<Param> {
+    match val.get_type()? {
+        ValueType::Undefined | ValueType::Null => Ok(Param::Null),
+        ValueType::Boolean => Ok(Param::Bool(val.coerce_to_bool()?)),
+        ValueType::Number => Ok(Param::Float(val.coerce_to_number()?.get_double()?)),
+        ValueType::String => {
+            let s = val.coerce_to_string()?.into_utf8()?;
+            Ok(Param::Text(s.as_str()?.to_string()))
+        }
+        ValueType::BigInt => {
+            let i = unsafe { val.cast::<BigInt>()?.get_i64() };
+            Ok(Param::Int(i.0))
+        }
+        ValueType::Object => {
+            if val.is_buffer()? {
+                let buf = unsafe { val.cast::<Buffer>()? };
+                Ok(Param::Blob(buf.as_ref().to_vec()))
+            } else if val.is_date()? {
+                let date = unsafe { val.cast::<Date>()? };
+                // date.value() returns f64 directly in some versions, 
+                // but checking the error it seems it might be returning something else?
+                // Actually, let's try to convert it to number if it's not f64.
+                Ok(Param::Float(date.value()))
             } else {
-                Box::new(n.as_f64().unwrap_or(0.0)) as Box<dyn ToSql + Send>
+                let env = unsafe { Env::from_raw(val.env()) };
+                // Using env.from_js_value requires serde-json feature
+                let json_value: serde_json::Value = env.from_js_value(*val)?;
+                Ok(Param::Text(json_value.to_string()))
             }
         }
-        Value::String(s) => Box::new(s.clone()) as Box<dyn ToSql + Send>,
-        Value::Array(arr) => {
-            // Convert array to JSON string for complex types
-            Box::new(serde_json::to_string(arr).unwrap_or_default()) as Box<dyn ToSql + Send>
-        }
-        Value::Object(obj) => {
-            // Convert object to JSON string
-            Box::new(serde_json::to_string(obj).unwrap_or_default()) as Box<dyn ToSql + Send>
+        _ => Ok(Param::Null),
+    }
+}
+
+pub fn convert_params(_env: &Env, params: Option<Unknown>) -> Result<Vec<Param>> {
+    let mut result = Vec::new();
+    if let Some(p) = params {
+        if p.is_array()? {
+            let arr = unsafe { p.cast::<Array>()? };
+            for i in 0..arr.len() {
+                result.push(js_to_param(&arr.get_element(i)?)?);
+            }
+        } else {
+            result.push(js_to_param(&p)?);
         }
     }
+    Ok(result)
 }

@@ -1,0 +1,115 @@
+name: Build
+
+on:
+  push:
+    branches: [main, develop]
+    tags:
+      - "v*"
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  RUST_TOOLCHAIN: stable
+  NODE_VERSION: "20"
+  NAPI_VERSION: "3"
+
+jobs:
+  build:
+    name: Build (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact_suffix: linux-x64
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            artifact_suffix: linux-arm64
+
+          # macOS
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            artifact_suffix: darwin-x64
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact_suffix: darwin-arm64
+
+          # Windows
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact_suffix: win32-x64
+          - os: windows-latest
+            target: i686-pc-windows-msvc
+            artifact_suffix: win32-ia32
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libpkgconf-dev
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: ${{ matrix.target }}
+
+      - name: Add target (Linux ARM64)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: rustup target add aarch64-unknown-linux-gnu
+
+      - name: Setup Cross toolchain
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        uses: arduino/setup-protoc@c93b6a6cf201d4e06579ef9094c5bd4a5194c84a
+        with:
+          version: "3"
+
+      - name: Cache Rust dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target/
+          key: ${{ matrix.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ${{ matrix.os }}-cargo-
+
+      - name: Install npm dependencies
+        run: npm install
+
+      - name: Build
+        run: npm run build -- --target ${{ matrix.target }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: bindings-${{ matrix.artifact_suffix }}
+          path: |
+            dist/*.node
+            package.json
+          retention-days: 7

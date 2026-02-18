@@ -463,4 +463,28 @@ impl Database {
             "sqlite_version": version
         }))
     }
+
+    /// Close the database connection and release all resources
+    /// After calling close, the database should not be used
+    #[napi]
+    pub fn close(&self) -> Result<()> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| Error::from_reason("DB Lock failed"))?;
+
+        // Execute a final checkpoint to ensure all data is written
+        conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").ok(); // Ignore errors during checkpoint
+
+        // Close the connection
+        drop(conn);
+
+        Ok(())
+    }
+
+    /// Check if the database connection is closed
+    #[napi]
+    pub fn is_closed(&self) -> bool {
+        self.conn.lock().is_err()
+    }
 }

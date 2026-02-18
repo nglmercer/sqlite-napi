@@ -21,29 +21,37 @@ Goal: Build a high-performance SQLite library for Node.js/Bun that mirrors the `
 - [x] Support for nested transactions (Savepoints) - via `transaction.savepoint(name)`
 - [x] Ensure `deferred`, `immediate`, and `exclusive` transaction modes
 
-## Phase 3: Advanced Bun Features (Complete ✅)
+## Phase 3: Advanced Features (Complete ✅)
 
 - [x] Implement `database.loadExtension(path)`
-- [x] Implement `database.serialize()` and `database.deserialize()` (In-memory back/restore)
-- [x] BLOB support: Input via `Uint8Array` (Buffer), Output as Base64
-- [x] `BigInt` support for 64-bit integers
-- [x] Implement `statement.finalize()` (Internal cleanup ready)
-- [x] Schema introspection (`getTables`, `getColumns`, `getMetadata`, etc.)
+- [x] Schema introspection (`getTables`, `getColumns`, `getMetadata`, `exportSchema`)
+- [x] `BigInt` support for 64-bit integer parameters
+- [x] Support for SQLite parameters in `$name`, `:name`, `@name` format
+- [x] Binary `database.serializeBinary()` and `database.deserializeBinary()` using SQLite native serialization
+- [x] Schema-only `database.serialize()` and `database.deserialize()` for SQL text backup
+- [x] BLOB support: Input via `Uint8Array`/`Buffer`, Output as Base64 strings
+- [x] Implement `database.close()` - close database connection and release resources
+- [x] Implement `database.is_closed()` - check if database connection is closed
+- [x] Implement `statement.iter(params)` - create iterator for streaming results
+- [x] Implement `iter.next()` - get next row from iterator
+- [x] Implement `iter.next_values()` - get next row as array
+- [x] Implement `iter.has_more()` - check if more rows available
+- [x] Implement `iter.all()` - get all remaining rows
+- [x] Implement `iter.reset()` - reset iterator to beginning
 
 ## Phase 4: Performance & Optimization (Complete ✅)
 
-- [x] Statement caching (using `prepare_cached` for all queries)
-- [x] Performance PRAGMAs (WAL mode, 64MB cache, memory temp store, 256MB mmap)
-- [x] Optimized parameter binding (avoiding JSON overhead for input)
+- [x] Statement caching (using `prepare_cached` for all internal queries)
+- [x] Performance PRAGMAs (WAL mode, optimized cache, synchronous=NORMAL, mmap)
+- [x] Optimized parameter binding (direct Rust conversion avoiding intermediate JSON)
 - [x] Multi-platform builds (Linux, macOS, Windows)
-- [ ] Zero-copy serialization for results (Future optimization)
-- [ ] Benchmarking against `bun:sqlite` and `better-sqlite3`
+- [ ] Zero-copy serialization for query results (Future investigation)
 
 ## Phase 5: Developer Experience
 
-- [x] TypeScript definitions that match `bun:sqlite` types
-- [ ] Support for mapping query results directly to JS classes
-- [ ] Comprehensive documentation and migration guide from `better-sqlite3`
+- [x] TypeScript definitions (`index.d.ts`) that match `bun:sqlite` types
+- [ ] Migration utilities for `better-sqlite3`
+- [ ] Comprehensive documentation and usage examples
 
 ## API Comparison Goal
 

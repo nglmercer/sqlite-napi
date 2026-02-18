@@ -16,6 +16,26 @@ pub struct Statement {
     conn: Arc<Mutex<Connection>>,
 }
 
+/// Iter struct - provides iterator for streaming query results
+#[napi]
+pub struct Iter {
+    // Store rows as a vector for iteration
+    rows: Vec<serde_json::Value>,
+    column_names: Vec<String>,
+    current_index: usize,
+}
+
+impl Iter {
+    /// Create a new Iter (internal use)
+    pub(crate) fn new(rows: Vec<serde_json::Value>, column_names: Vec<String>) -> Self {
+        Iter {
+            rows,
+            column_names,
+            current_index: 0,
+        }
+    }
+}
+
 impl Statement {
     /// Create a new Statement (internal use)
     pub(crate) fn new(sql: String, conn: Arc<Mutex<Connection>>) -> Self {
@@ -35,6 +55,7 @@ impl Statement {
         let mut stmt = conn.prepare_cached(&self.sql).map_err(to_napi_error)?;
 
         let column_names: Vec<String> = stmt.column_names().iter().map(|s| s.to_string()).collect();
+        let column_count = stmt.column_count();
         let rusqlite_params = convert_params(&env, params)?;
         let params_refs: Vec<&dyn ToSql> =
             rusqlite_params.iter().map(|p| p as &dyn ToSql).collect();
@@ -47,9 +68,13 @@ impl Statement {
 
         while let Some(row) = rows.next().map_err(to_napi_error)? {
             let mut map = serde_json::Map::new();
-            for (i, name) in column_names.iter().enumerate() {
+            for i in 0..column_count {
                 let val = sqlite_to_json(row, i).map_err(to_napi_error)?;
-                map.insert(name.clone(), val);
+                let name = column_names
+                    .get(i)
+                    .cloned()
+                    .unwrap_or_else(|| format!("col_{}", i));
+                map.insert(name, val);
             }
             results.push(serde_json::Value::Object(map));
         }
@@ -67,6 +92,7 @@ impl Statement {
         let mut stmt = conn.prepare_cached(&self.sql).map_err(to_napi_error)?;
 
         let column_names: Vec<String> = stmt.column_names().iter().map(|s| s.to_string()).collect();
+        let column_count = stmt.column_count();
         let rusqlite_params = convert_params(&env, params)?;
         let params_refs: Vec<&dyn ToSql> =
             rusqlite_params.iter().map(|p| p as &dyn ToSql).collect();
@@ -77,9 +103,13 @@ impl Statement {
 
         if let Some(row) = rows.next().map_err(to_napi_error)? {
             let mut map = serde_json::Map::new();
-            for (i, name) in column_names.iter().enumerate() {
+            for i in 0..column_count {
                 let val = sqlite_to_json(row, i).map_err(to_napi_error)?;
-                map.insert(name.clone(), val);
+                let name = column_names
+                    .get(i)
+                    .cloned()
+                    .unwrap_or_else(|| format!("col_{}", i));
+                map.insert(name, val);
             }
             Ok(serde_json::Value::Object(map))
         } else {
@@ -146,5 +176,106 @@ impl Statement {
     #[napi]
     pub fn finalize(&self) -> Result<()> {
         Ok(())
+    }
+
+    /// Create an iterator for streaming query results
+    /// Returns an Iter object that can be used to fetch rows one at a time
+    #[napi]
+    pub fn iter(&self, env: Env, params: Option<Unknown>) -> Result<Iter> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| Error::from_reason("DB Lock failed"))?;
+
+        let mut stmt = conn.prepare_cached(&self.sql).map_err(to_napi_error)?;
+
+        let column_names: Vec<String> = stmt.column_names().iter().map(|s| s.to_string()).collect();
+        let column_count = stmt.column_count();
+
+        let rusqlite_params = convert_params(&env, params)?;
+        let params_refs: Vec<&dyn ToSql> =
+            rusqlite_params.iter().map(|p| p as &dyn ToSql).collect();
+
+        let mut rows_iter = stmt
+            .query(params_from_iter(params_refs))
+            .map_err(to_napi_error)?;
+
+        // Pre-fetch all rows since we need to release the connection lock
+        let mut rows = Vec::new();
+        while let Some(row) = rows_iter.next().map_err(to_napi_error)? {
+            let mut map = serde_json::Map::new();
+            for i in 0..column_count {
+                let val = sqlite_to_json(row, i).map_err(to_napi_error)?;
+                let name = column_names
+                    .get(i)
+                    .cloned()
+                    .unwrap_or_else(|| format!("col_{}", i));
+                map.insert(name, val);
+            }
+            rows.push(serde_json::Value::Object(map));
+        }
+
+        Ok(Iter::new(rows, column_names))
+    }
+}
+
+#[napi]
+impl Iter {
+    /// Continue iterating and get the next row as an object
+    /// Returns null when there are no more rows
+    #[allow(clippy::should_implement_trait)]
+    #[napi]
+    pub fn next(&mut self) -> Result<Option<serde_json::Value>> {
+        if self.current_index >= self.rows.len() {
+            return Ok(None);
+        }
+
+        let row = self.rows[self.current_index].clone();
+        self.current_index += 1;
+        Ok(Some(row))
+    }
+
+    /// Continue iterating and get the next row as an array of values
+    /// Returns null when there are no more rows
+    #[napi]
+    pub fn next_values(&mut self) -> Result<Option<serde_json::Value>> {
+        if self.current_index >= self.rows.len() {
+            return Ok(None);
+        }
+
+        // Convert the current row object to an array
+        let row = self.rows[self.current_index].clone();
+        self.current_index += 1;
+
+        if let serde_json::Value::Object(map) = row {
+            let mut arr = Vec::new();
+            for name in &self.column_names {
+                let val = map.get(name).cloned().unwrap_or(serde_json::Value::Null);
+                arr.push(val);
+            }
+            Ok(Some(serde_json::Value::Array(arr)))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Check if there are more rows to iterate
+    #[napi]
+    pub fn has_more(&self) -> bool {
+        self.current_index < self.rows.len()
+    }
+
+    /// Get all remaining rows at once
+    #[napi]
+    pub fn all(&mut self) -> Result<serde_json::Value> {
+        let remaining: Vec<serde_json::Value> = self.rows[self.current_index..].to_vec();
+        self.current_index = self.rows.len();
+        Ok(serde_json::Value::Array(remaining))
+    }
+
+    /// Reset the iterator to the beginning
+    #[napi]
+    pub fn reset(&mut self) {
+        self.current_index = 0;
     }
 }

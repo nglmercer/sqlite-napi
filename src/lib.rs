@@ -4,7 +4,7 @@ pub mod db;
 mod error;
 mod models;
 
-pub use db::{Database, Statement, Transaction};
+pub use db::{Database, Iter, Statement, Transaction};
 pub use models::{QueryResult, TransactionResult};
 
 #[napi]

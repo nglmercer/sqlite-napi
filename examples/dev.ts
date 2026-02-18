@@ -1,4 +1,4 @@
-import { Database, getSqliteVersion } from "../index";
+import { Database, getSqliteVersion } from "sqlite-napi";
 
 async function main() {
   console.log("SQLite NAPI - Full API Demo\n");

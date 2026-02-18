@@ -6,7 +6,7 @@
  */
 
 import { Schema, StandardFields, createZodFromSchema, createZodInputSchema, createZodWhereSchema } from './core/index.js';
-
+import fs from 'fs';
 // ============================================
 // Example 1: Basic Schema to Zod
 // ============================================
@@ -123,6 +123,6 @@ const validToken = {
 };
 
 const tokenResult = oauthZodSchema.safeParse(validToken);
-console.log('Token validation:', tokenResult.success ? '✓ Valid' : '✗ Invalid');
-
+console.log({ tokenResult, schema: oauthZodSchema.toJSONSchema()})
+fs.writeFileSync("oauthSchema.json", JSON.stringify(oauthZodSchema.toJSONSchema(), null, 2));
 console.log('\n=== All examples completed! ===');

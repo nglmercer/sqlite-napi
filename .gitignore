@@ -252,3 +252,4 @@ Cargo.lock
 # Additional
 *.map
 *.min.*
+**Schema.json

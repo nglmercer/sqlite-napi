@@ -50,7 +50,6 @@ Goal: Build a high-performance SQLite library for Node.js/Bun that mirrors the `
 ## Phase 5: Developer Experience (In Progress 🔄)
 
 - [x] TypeScript definitions (`index.d.ts`) that match `bun:sqlite` types
-- [ ] Migration utilities for `better-sqlite3`
 - [x] Comprehensive documentation and usage examples
 
 ## Phase 6: Bug Fixes & Improvements (Complete ✅)
@@ -96,24 +95,30 @@ Goal: Build a high-performance SQLite library for Node.js/Bun that mirrors the `
 - [x] Implement `database.pragma(name, value)` - convenience method for PRAGMA statements
 - [x] Add database file path accessor: `database.filename`
 
+### Implementation Notes
+
+- `createFunction`: Registers function with SQLite but returns NULL as placeholder. Full JavaScript callback support requires complex async/await handling between SQLite's C thread and JavaScript.
+- `createCollation`: Uses default Rust string comparison. Full JavaScript callback support requires complex async/await handling.
+- Aggregate and window functions require async callback support which is planned for a future version.
+
 ## API Comparison Goal
 
 | Feature            | `bun:sqlite`                            | `sqlite-napi`                            | Status |
 | :----------------- | :-------------------------------------- | :--------------------------------------- | :----- |
 | Import             | `import { Database } from "bun:sqlite"` | `import { Database } from "sqlite-napi"` | ✅     |
 | Instance           | `new Database("path")`                  | `new Database("path")`                   | ✅     |
-| Instance with opts | `new Database("path", { readonly })`   | `new Database("path", { readonly })`    | ✅     |
+| Instance with opts | `new Database("path", { readonly })`    | `new Database("path", { readonly })`     | ✅     |
 | Query              | `db.query("...")` -> `Statement`        | `db.query("...")` -> `Statement`         | ✅     |
 | Result             | `stmt.all()`                            | `stmt.all()`                             | ✅     |
 | Meta               | `stmt.run()`                            | `stmt.run()`                             | ✅     |
-| Named params       | `stmt.all({ $name: val })`              | `stmt.all({ $name: val })`              | ✅     |
+| Named params       | `stmt.all({ $name: val })`              | `stmt.all({ $name: val })`               | ✅     |
 | Column metadata    | `stmt.columns`                          | `stmt.columns`                           | ✅     |
-| Statement source   | `stmt.source`                          | `stmt.source`                            | ✅     |
+| Statement source   | `stmt.source`                           | `stmt.source`                            | ✅     |
 | Transaction state  | `db.inTransaction`                      | `db.inTransaction()`                     | ✅     |
 | Custom functions   | `db.createFunction()`                   | `db.createFunction()`                    | ✅ ⚠️  |
 | Custom collations  | `db.createCollation()`                  | `db.createCollation()`                   | ✅ ⚠️  |
-| Pragma            | `db.pragma()`                          | `db.pragma()`                           | ✅     |
-| Database path      | `db.filename`                          | `db.filename`                            | ✅     |
+| Pragma             | `db.pragma()`                           | `db.pragma()`                            | ✅     |
+| Database path      | `db.filename`                           | `db.filename`                            | ✅     |
 | Close connection   | `db.close()`                            | `db.close()`                             | ✅     |
 | Check closed       | `db.closed`                             | `db.isClosed()`                          | ✅     |
 

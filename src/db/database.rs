@@ -604,12 +604,10 @@ impl Database {
     /// The function receives arguments passed from SQL and can return any value
     /// that SQLite can handle (numbers, strings, null, Uint8Array for blobs).
     ///
-    /// Note: This implementation registers a simple pass-through function.
-    /// Full JavaScript callback support requires async/await handling which is
-    /// planned for a future version.
+    /// Note: Full JavaScript callback support requires complex async/await handling.
+    /// This implementation registers a placeholder that returns NULL.
     #[napi]
-    pub fn create_function(&self, name: String, _func: Function) -> Result<()> {
-        // Clone the functions map for the closure
+    pub fn create_function(&self, _env: Env, name: String, _func: Function) -> Result<()> {
         let functions = self.functions.clone();
 
         // Check if function already exists
@@ -625,41 +623,22 @@ impl Database {
             }
         }
 
-        // Note: Full implementation requires complex async callback handling
-        // between SQLite's C thread and JavaScript. This registers a placeholder
-        // that logs calls but doesn't execute the JS function.
-        //
-        // To implement properly, we would need to:
-        // 1. Use napi-rs ThreadsafeFunction to call JS from native thread
-        // 2. Handle async result conversion back to SQLite values
-        // 3. Manage the callback lifetime across database connections
-        //
-        // For now, we register a function that demonstrates the API works
-        // but returns NULL for all calls.
-
-        // Create a simple UDF that returns a fixed value
-        // In a full implementation, this would call the JS callback
         let conn = self
             .conn
             .lock()
             .map_err(|_| Error::from_reason("DB Lock failed"))?;
 
-        // Use a simple approach: register a function that returns its input
-        // This demonstrates the API is functional
+        // Register a simple scalar function that returns NULL as a placeholder
+        // Full implementation would use ThreadsafeFunction to call JS callback
         conn.create_scalar_function(
             &name,
             -1,
             rusqlite::functions::FunctionFlags::SQLITE_UTF8
                 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC,
-            |_ctx: &rusqlite::functions::Context| {
-                // Return NULL to indicate function is registered but needs full callback support
-                Ok(rusqlite::types::Value::Null)
-            },
+            |_ctx: &rusqlite::functions::Context| Ok(rusqlite::types::Value::Null),
         )
         .map_err(to_napi_error)?;
 
-        // Store placeholder in functions map
-        // In full implementation, we'd store the actual ThreadsafeFunction here
         let mut funcs = functions
             .lock()
             .map_err(|_| Error::from_reason("Lock failed"))?;
@@ -683,11 +662,10 @@ impl Database {
     /// // Then use: SELECT * FROM table ORDER BY column COLLATE my_collation
     /// ```
     ///
-    /// Note: This implementation registers a basic collation.
-    /// Full JavaScript callback support is planned for a future version.
+    /// Note: Full JavaScript callback support requires complex async/await handling.
+    /// This implementation uses default Rust string comparison.
     #[napi]
-    pub fn create_collation(&self, name: String, _compare_fn: Function) -> Result<()> {
-        // Clone the collations map for the closure
+    pub fn create_collation(&self, _env: Env, name: String, _compare_fn: Function) -> Result<()> {
         let collations = self.collations.clone();
 
         // Check if collation already exists
@@ -708,16 +686,11 @@ impl Database {
             .lock()
             .map_err(|_| Error::from_reason("DB Lock failed"))?;
 
-        // Register a simple binary collation that uses default comparison
-        // Full implementation would call the JS compare function
-        conn.create_collation(&name, |a: &str, b: &str| {
-            // Use default Rust string comparison as placeholder
-            // Full implementation would call the JS callback
-            a.cmp(b)
-        })
-        .map_err(to_napi_error)?;
+        // Register a simple collation using default Rust string comparison
+        // Full implementation would use ThreadsafeFunction to call JS callback
+        conn.create_collation(&name, |a: &str, b: &str| a.cmp(b))
+            .map_err(to_napi_error)?;
 
-        // Store placeholder in collations map
         let mut colls = collations
             .lock()
             .map_err(|_| Error::from_reason("Lock failed"))?;

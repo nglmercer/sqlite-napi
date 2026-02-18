@@ -69,7 +69,7 @@ impl Statement {
         let column_count = stmt.column_count();
 
         let params_container = convert_params_container(&env, params)?;
-        
+
         match params_container {
             crate::db::ParamsContainer::Positional(positional_params) => {
                 let params_refs: Vec<&dyn ToSql> =
@@ -100,7 +100,9 @@ impl Statement {
                 for (key, param) in named_params.iter() {
                     named_params_refs.push((key.as_str(), param as &dyn ToSql));
                 }
-                let mut rows = stmt.query(named_params_refs.as_slice()).map_err(to_napi_error)?;
+                let mut rows = stmt
+                    .query(named_params_refs.as_slice())
+                    .map_err(to_napi_error)?;
                 while let Some(row) = rows.next().map_err(to_napi_error)? {
                     let mut map = serde_json::Map::new();
                     for i in 0..column_count {
@@ -132,7 +134,7 @@ impl Statement {
         let column_count = stmt.column_count();
 
         let params_container = convert_params_container(&env, params)?;
-        
+
         match params_container {
             crate::db::ParamsContainer::Positional(positional_params) => {
                 let params_refs: Vec<&dyn ToSql> =
@@ -158,7 +160,9 @@ impl Statement {
                 for (key, param) in named_params.iter() {
                     named_params_refs.push((key.as_str(), param as &dyn ToSql));
                 }
-                let mut rows = stmt.query(named_params_refs.as_slice()).map_err(to_napi_error)?;
+                let mut rows = stmt
+                    .query(named_params_refs.as_slice())
+                    .map_err(to_napi_error)?;
                 if let Some(row) = rows.next().map_err(to_napi_error)? {
                     let mut map = serde_json::Map::new();
                     for i in 0..column_count {
@@ -188,7 +192,7 @@ impl Statement {
         let mut stmt = conn.prepare(&self.sql).map_err(to_napi_error)?;
 
         let params_container = convert_params_container(&env, params)?;
-        
+
         match params_container {
             crate::db::ParamsContainer::Positional(positional_params) => {
                 let params_refs: Vec<&dyn ToSql> =
@@ -229,7 +233,7 @@ impl Statement {
         let column_count = stmt.column_count();
 
         let params_container = convert_params_container(&env, params)?;
-        
+
         match params_container {
             crate::db::ParamsContainer::Positional(positional_params) => {
                 let params_refs: Vec<&dyn ToSql> =
@@ -251,7 +255,9 @@ impl Statement {
                 for (key, param) in named_params.iter() {
                     named_params_refs.push((key.as_str(), param as &dyn ToSql));
                 }
-                let mut rows = stmt.query(named_params_refs.as_slice()).map_err(to_napi_error)?;
+                let mut rows = stmt
+                    .query(named_params_refs.as_slice())
+                    .map_err(to_napi_error)?;
                 let mut results = Vec::new();
                 while let Some(row) = rows.next().map_err(to_napi_error)? {
                     let mut row_arr = Vec::new();
@@ -286,7 +292,7 @@ impl Statement {
         let column_count = stmt.column_count();
 
         let params_container = convert_params_container(&env, params)?;
-        
+
         let rows: Vec<serde_json::Value> = match params_container {
             crate::db::ParamsContainer::Positional(positional_params) => {
                 let params_refs: Vec<&dyn ToSql> =
@@ -312,7 +318,9 @@ impl Statement {
                 for (key, param) in named_params.iter() {
                     named_params_refs.push((key.as_str(), param as &dyn ToSql));
                 }
-                let mut rows_iter = stmt.query(named_params_refs.as_slice()).map_err(to_napi_error)?;
+                let mut rows_iter = stmt
+                    .query(named_params_refs.as_slice())
+                    .map_err(to_napi_error)?;
                 let mut rows = Vec::new();
                 while let Some(row) = rows_iter.next().map_err(to_napi_error)? {
                     let mut map = serde_json::Map::new();

@@ -13,8 +13,8 @@ pub fn sqlite_to_json(row: &Row, i: usize) -> Result<Value, rusqlite::Error> {
             // JavaScript's MAX_SAFE_INTEGER is 2^53 - 1
             const MAX_SAFE_INTEGER: i64 = 9007199254740991;
             const MIN_SAFE_INTEGER: i64 = -9007199254740991;
-            
-            if i >= MIN_SAFE_INTEGER && i <= MAX_SAFE_INTEGER {
+
+            if (MIN_SAFE_INTEGER..=MAX_SAFE_INTEGER).contains(&i) {
                 // Safe integer - convert directly
                 Ok(Value::Number(i.into()))
             } else {
@@ -38,4 +38,3 @@ pub fn sqlite_to_json(row: &Row, i: usize) -> Result<Value, rusqlite::Error> {
         ))),
     }
 }
-

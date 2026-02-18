@@ -164,16 +164,8 @@ impl Database {
     /// Prepare a SQL statement for execution
     #[napi]
     pub fn query(&self, sql: String) -> Result<Statement> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| Error::from_reason("DB Lock failed"))?;
-        
-        // Prepare statement to validate SQL syntax
-        // This will throw for invalid SQL at query() time
-        let stmt = conn.prepare(&sql).map_err(to_napi_error)?;
-        drop(stmt);
-        
+        // Don't validate SQL here - let it fail at execution time if invalid
+        // This allows getting stmt.source() even for queries referencing non-existent tables
         Ok(Statement::new(sql, self.conn.clone()))
     }
 
@@ -184,9 +176,9 @@ impl Database {
             .conn
             .lock()
             .map_err(|_| Error::from_reason("DB Lock failed"))?;
-        
+
         let params_container = convert_params_container(&env, params)?;
-        
+
         match params_container {
             crate::db::ParamsContainer::Positional(positional_params) => {
                 let params_refs: Vec<&dyn ToSql> =
@@ -203,7 +195,7 @@ impl Database {
                     .map_err(to_napi_error)?;
             }
         }
-        
+
         Ok(QueryResult {
             changes: conn.changes() as u32,
             last_insert_rowid: conn.last_insert_rowid(),
@@ -823,7 +815,7 @@ impl Database {
         if let Some(val) = value {
             let env = Env::from_raw(val.env());
             let params_container = convert_params_container(&env, Some(val))?;
-            
+
             match params_container {
                 crate::db::ParamsContainer::Positional(positional_params) => {
                     if positional_params.len() == 1 {
@@ -834,11 +826,11 @@ impl Database {
                                 let pragma_name_lower = name.to_lowercase();
                                 if pragma_name_lower == "busy_timeout" {
                                     // busy_timeout returns an integer
-                                    let result: i64 = conn.query_row(
-                                        &format!("PRAGMA {} = {}", name, i),
-                                        [],
-                                        |row| row.get(0),
-                                    ).map_err(to_napi_error)?;
+                                    let result: i64 = conn
+                                        .query_row(&format!("PRAGMA {} = {}", name, i), [], |row| {
+                                            row.get(0)
+                                        })
+                                        .map_err(to_napi_error)?;
                                     return Ok(serde_json::Value::Number(result.into()));
                                 }
                                 // Execute the pragma (integer pragmas don't return results)
@@ -847,16 +839,19 @@ impl Database {
                             }
                             crate::db::Param::Text(s) => {
                                 // String pragmas like journal_mode return a result
-                                let result: String = conn.query_row(
-                                    &format!("PRAGMA {} = '{}'", name, s),
-                                    [],
-                                    |row| row.get(0),
-                                ).map_err(to_napi_error)?;
+                                let result: String = conn
+                                    .query_row(&format!("PRAGMA {} = '{}'", name, s), [], |row| {
+                                        row.get(0)
+                                    })
+                                    .map_err(to_napi_error)?;
                                 return Ok(serde_json::Value::String(result));
                             }
                             crate::db::Param::Float(f) => {
                                 // For Float, we need to check if it's a whole number
-                                if *f == f.floor() && f.abs() < (i64::MAX as f64) && f.abs() < (i64::MAX as f64) {
+                                if *f == f.floor()
+                                    && f.abs() < (i64::MAX as f64)
+                                    && f.abs() < (i64::MAX as f64)
+                                {
                                     conn.execute(&format!("PRAGMA {} = {}", name, *f as i64), [])
                                         .map_err(to_napi_error)?;
                                 } else {
@@ -882,11 +877,11 @@ impl Database {
                                     .map_err(to_napi_error)?;
                             }
                             crate::db::Param::Text(s) => {
-                                let result: String = conn.query_row(
-                                    &format!("PRAGMA {} = '{}'", name, s),
-                                    [],
-                                    |row| row.get(0),
-                                ).map_err(to_napi_error)?;
+                                let result: String = conn
+                                    .query_row(&format!("PRAGMA {} = '{}'", name, s), [], |row| {
+                                        row.get(0)
+                                    })
+                                    .map_err(to_napi_error)?;
                                 return Ok(serde_json::Value::String(result));
                             }
                             crate::db::Param::Float(f) => {
@@ -907,7 +902,7 @@ impl Database {
                     }
                 }
             }
-            
+
             // Read back the pragma value after setting it
             let mut stmt = conn
                 .prepare(&format!("PRAGMA {}", name))
@@ -967,4 +962,3 @@ impl Database {
         }
     }
 }
-

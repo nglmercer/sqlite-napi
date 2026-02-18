@@ -9,6 +9,9 @@ describe("SQLite NAPI - Statement Metadata", () => {
     db.exec(
       "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, age INTEGER, email TEXT)"
     );
+    db.exec(
+      "CREATE TABLE posts (id INTEGER PRIMARY KEY, user_id INTEGER, title TEXT)"
+    );
     db.run("INSERT INTO users (name, age, email) VALUES (?, ?, ?)", [
       "Alice",
       30,
@@ -75,7 +78,6 @@ describe("SQLite NAPI - Statement Metadata", () => {
     });
 
     test("returns columns for JOIN query", () => {
-      db.exec("CREATE TABLE posts (id INTEGER PRIMARY KEY, user_id INTEGER, title TEXT)");
       db.run("INSERT INTO posts (user_id, title) VALUES (?, ?)", [1, "Hello"]);
 
       const stmt = db.query(

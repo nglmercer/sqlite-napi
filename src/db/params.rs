@@ -42,7 +42,10 @@ pub fn js_to_param(val: &Unknown) -> Result<Param> {
             // Try getting as double first - if it's a float it will work
             if let Ok(d) = num.get_double() {
                 // Check if it's actually a whole number that fits in i64
-                if d.fract() == 0.0 && d.abs() < (i64::MAX as f64) && d.abs() < (i64::MIN as f64).abs() {
+                if d.fract() == 0.0
+                    && d.abs() < (i64::MAX as f64)
+                    && d.abs() < (i64::MIN as f64).abs()
+                {
                     Ok(Param::Int(d as i64))
                 } else {
                     Ok(Param::Float(d))

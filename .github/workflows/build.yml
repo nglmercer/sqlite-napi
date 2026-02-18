@@ -63,7 +63,7 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libasound2-dev libpkgconf-dev
+          sudo apt-get install -y libasound2-dev libpkgconf-dev gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -79,12 +79,6 @@ jobs:
       - name: Add target (Linux ARM64)
         if: matrix.target == 'aarch64-unknown-linux-gnu'
         run: rustup target add aarch64-unknown-linux-gnu
-
-      - name: Setup Cross toolchain
-        if: matrix.target == 'aarch64-unknown-linux-gnu'
-        uses: arduino/setup-protoc@v1
-        with:
-          version: "3"
 
       - name: Cache Rust dependencies
         uses: actions/cache@v4
@@ -104,6 +98,10 @@ jobs:
         run: npm run build -- --target ${{ matrix.target }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+          CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
+          CXX_aarch64_unknown_linux_gnu: aarch64-linux-gnu-g++
+          AR_aarch64_unknown_linux_gnu: aarch64-linux-gnu-ar
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4

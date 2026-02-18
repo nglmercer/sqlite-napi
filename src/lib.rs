@@ -1,6 +1,6 @@
 use napi_derive::napi;
 
-mod db;
+pub mod db;
 mod error;
 mod models;
 

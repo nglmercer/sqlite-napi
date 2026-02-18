@@ -21,7 +21,11 @@ impl ToSql for Param {
             Param::Float(f) => Ok(ToSqlOutput::Borrowed(ValueRef::Real(*f))),
             Param::Text(s) => Ok(ToSqlOutput::Borrowed(ValueRef::Text(s.as_bytes()))),
             Param::Blob(b) => Ok(ToSqlOutput::Borrowed(ValueRef::Blob(b))),
-            Param::Bool(b) => Ok(ToSqlOutput::Borrowed(ValueRef::Integer(if *b { 1 } else { 0 }))),
+            Param::Bool(b) => Ok(ToSqlOutput::Borrowed(ValueRef::Integer(if *b {
+                1
+            } else {
+                0
+            }))),
         }
     }
 }

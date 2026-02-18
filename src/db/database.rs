@@ -2,10 +2,10 @@
 
 use crate::db::convert_params;
 use crate::error::to_napi_error;
-use crate::models::{QueryResult};
+use crate::models::QueryResult;
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
-use rusqlite::{Connection, ToSql};
+use rusqlite::{serialize::OwnedData, Connection, DatabaseName, ToSql};
 
 use std::sync::{Arc, Mutex};
 
@@ -28,11 +28,11 @@ impl Database {
         } else {
             Connection::open(path).map_err(to_napi_error)?
         };
-        
+
         // Enable extended result codes for better error handling
         conn.execute_batch("PRAGMA extended_result_codes = ON")
             .map_err(to_napi_error)?;
-        
+
         // Performance PRAGMAs for optimized performance
         conn.execute_batch(
             "PRAGMA journal_mode = WAL;
@@ -40,9 +40,10 @@ impl Database {
              PRAGMA cache_size = -64000;
              PRAGMA temp_store = MEMORY;
              PRAGMA mmap_size = 268435456;
-             PRAGMA foreign_keys = ON;"
-        ).map_err(to_napi_error)?;
-        
+             PRAGMA foreign_keys = ON;",
+        )
+        .map_err(to_napi_error)?;
+
         Ok(Database {
             conn: Arc::new(Mutex::new(conn)),
         })
@@ -70,9 +71,9 @@ impl Database {
             .conn
             .lock()
             .map_err(|_| Error::from_reason("DB Lock failed"))?;
-        
+
         let rusqlite_params = convert_params(&env, params)?;
-        let params_refs: Vec<&dyn ToSql> = 
+        let params_refs: Vec<&dyn ToSql> =
             rusqlite_params.iter().map(|p| p as &dyn ToSql).collect();
 
         conn.execute(&sql, params_refs.as_slice())
@@ -120,7 +121,11 @@ impl Database {
 
     /// Execute multiple statements in a transaction
     #[napi]
-    pub fn transaction_fn(&self, mode: Option<String>, statements: Vec<String>) -> Result<QueryResult> {
+    pub fn transaction_fn(
+        &self,
+        mode: Option<String>,
+        statements: Vec<String>,
+    ) -> Result<QueryResult> {
         let conn = self
             .conn
             .lock()
@@ -161,43 +166,85 @@ impl Database {
             .lock()
             .map_err(|_| Error::from_reason("DB Lock failed"))?;
         unsafe {
-            conn.load_extension(&path, None)
-                .map_err(to_napi_error)?;
+            conn.load_extension(&path, None).map_err(to_napi_error)?;
         }
         Ok(())
     }
 
-    /// Serialize the database to SQL statements (for in-memory backup)
+    /// Serialize the database to binary format (full database backup)
+    /// Returns a Buffer containing the complete SQLite database file
+    #[napi]
+    pub fn serialize_binary(&self) -> Result<Buffer> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| Error::from_reason("DB Lock failed"))?;
+
+        let data = conn.serialize(DatabaseName::Main).map_err(to_napi_error)?;
+
+        Ok(Buffer::from(data.to_vec()))
+    }
+
+    /// Deserialize a database from binary format (restore from backup)
+    /// Accepts a Buffer containing a complete SQLite database file
+    #[napi]
+    pub fn deserialize_binary(&self, data: Buffer, read_only: Option<bool>) -> Result<()> {
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|_| Error::from_reason("DB Lock failed"))?;
+
+        // Create OwnedData from the buffer
+        // sqlite3_deserialize expects memory allocated by sqlite3_malloc
+        let len = data.len();
+        let sqlite_ptr = unsafe { rusqlite::ffi::sqlite3_malloc(len as i32) as *mut u8 };
+        if sqlite_ptr.is_null() {
+            return Err(Error::from_reason("Failed to allocate memory"));
+        }
+        unsafe {
+            std::ptr::copy_nonoverlapping(data.as_ref().as_ptr(), sqlite_ptr, len);
+        }
+
+        let owned_data = unsafe {
+            OwnedData::from_raw_nonnull(std::ptr::NonNull::new_unchecked(sqlite_ptr), len)
+        };
+
+        conn.deserialize(DatabaseName::Main, owned_data, read_only.unwrap_or(false))
+            .map_err(to_napi_error)?;
+
+        Ok(())
+    }
+
+    /// Serialize the database schema to SQL statements (for schema backup)
     #[napi]
     pub fn serialize(&self) -> Result<String> {
         let conn = self
             .conn
             .lock()
             .map_err(|_| Error::from_reason("DB Lock failed"))?;
-        
+
         let mut stmt = conn
             .prepare("SELECT sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY CASE WHEN type = 'table' THEN 1 WHEN type = 'index' THEN 2 ELSE 3 END, name")
             .map_err(to_napi_error)?;
-        
+
         let statements: Vec<String> = stmt
             .query_map([], |row| row.get(0))
             .map_err(to_napi_error)?
             .filter_map(|r| r.ok())
             .collect();
-        
+
         Ok(statements.join(";\n"))
     }
 
-    /// Deserialize a database from SQL statements (restore from backup)
+    /// Deserialize a database from SQL statements (restore schema from backup)
     #[napi]
     pub fn deserialize(&self, sql: String) -> Result<()> {
         let conn = self
             .conn
             .lock()
             .map_err(|_| Error::from_reason("DB Lock failed"))?;
-        
-        conn.execute_batch(&sql)
-            .map_err(to_napi_error)?;
+
+        conn.execute_batch(&sql).map_err(to_napi_error)?;
         Ok(())
     }
 
@@ -212,17 +259,17 @@ impl Database {
             .conn
             .lock()
             .map_err(|_| Error::from_reason("DB Lock failed"))?;
-        
+
         let mut stmt = conn
             .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
             .map_err(to_napi_error)?;
-        
+
         let tables: Vec<String> = stmt
             .query_map([], |row| row.get(0))
             .map_err(to_napi_error)?
             .filter_map(|r| r.ok())
             .collect();
-        
+
         Ok(tables)
     }
 
@@ -233,11 +280,11 @@ impl Database {
             .conn
             .lock()
             .map_err(|_| Error::from_reason("DB Lock failed"))?;
-        
+
         let mut stmt = conn
             .prepare(&format!("PRAGMA table_info({})", table_name))
             .map_err(to_napi_error)?;
-        
+
         let columns: Vec<serde_json::Value> = stmt
             .query_map([], |row| {
                 let cid: i32 = row.get(0)?;
@@ -246,7 +293,7 @@ impl Database {
                 let notnull: i32 = row.get(3)?;
                 let dflt_value: Option<String> = row.get(4)?;
                 let pk: i32 = row.get(5)?;
-                
+
                 Ok(serde_json::json!({
                     "cid": cid,
                     "name": name,
@@ -259,7 +306,7 @@ impl Database {
             .map_err(to_napi_error)?
             .filter_map(|r| r.ok())
             .collect();
-        
+
         Ok(columns)
     }
 
@@ -270,38 +317,38 @@ impl Database {
             .conn
             .lock()
             .map_err(|_| Error::from_reason("DB Lock failed"))?;
-        
+
         let mut stmt = conn
             .prepare(&format!("PRAGMA index_list({})", table_name))
             .map_err(to_napi_error)?;
-        
+
         let mut indexes: Vec<serde_json::Value> = Vec::new();
-        
+
         let index_rows: Vec<(String, i32, String, i32, Option<String>)> = stmt
             .query_map([], |row| {
                 Ok((
-                    row.get::<_, String>(0)?, // name
-                    row.get::<_, i32>(1)?,    // unique
-                    row.get::<_, String>(2)?, // origin
-                    row.get::<_, i32>(3)?,    // partial
+                    row.get::<_, String>(0)?,         // name
+                    row.get::<_, i32>(1)?,            // unique
+                    row.get::<_, String>(2)?,         // origin
+                    row.get::<_, i32>(3)?,            // partial
                     row.get::<_, Option<String>>(4)?, // tbl_name (optional)
                 ))
             })
             .map_err(to_napi_error)?
             .filter_map(|r| r.ok())
             .collect();
-        
+
         for (name, unique, origin, partial, _tbl_name) in index_rows {
             let mut col_stmt = conn
                 .prepare(&format!("PRAGMA index_info({})", name))
                 .map_err(to_napi_error)?;
-            
+
             let columns: Vec<String> = col_stmt
                 .query_map([], |row| row.get(2))
                 .map_err(to_napi_error)?
                 .filter_map(|r| r.ok())
                 .collect();
-            
+
             indexes.push(serde_json::json!({
                 "name": name,
                 "unique": unique == 1,
@@ -310,7 +357,7 @@ impl Database {
                 "columns": columns
             }));
         }
-        
+
         Ok(indexes)
     }
 
@@ -321,15 +368,13 @@ impl Database {
             .conn
             .lock()
             .map_err(|_| Error::from_reason("DB Lock failed"))?;
-        
+
         let mut stmt = conn
             .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?")
             .map_err(to_napi_error)?;
-        
-        let sql: Option<String> = stmt
-            .query_row([&table_name], |row| row.get(0))
-            .ok();
-        
+
+        let sql: Option<String> = stmt.query_row([&table_name], |row| row.get(0)).ok();
+
         Ok(sql)
     }
 
@@ -340,17 +385,17 @@ impl Database {
             .conn
             .lock()
             .map_err(|_| Error::from_reason("DB Lock failed"))?;
-        
+
         let mut stmt = conn
             .prepare("SELECT sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY CASE WHEN type = 'table' THEN 1 WHEN type = 'index' THEN 2 ELSE 3 END, name")
             .map_err(to_napi_error)?;
-        
+
         let statements: Vec<String> = stmt
             .query_map([], |row| row.get(0))
             .map_err(to_napi_error)?
             .filter_map(|r| r.ok())
             .collect();
-        
+
         Ok(statements.join(";\n"))
     }
 
@@ -361,7 +406,7 @@ impl Database {
             .conn
             .lock()
             .map_err(|_| Error::from_reason("DB Lock failed"))?;
-        
+
         let count: i32 = conn
             .query_row(
                 "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?",
@@ -369,7 +414,7 @@ impl Database {
                 |row| row.get(0),
             )
             .map_err(to_napi_error)?;
-        
+
         Ok(count > 0)
     }
 
@@ -380,7 +425,7 @@ impl Database {
             .conn
             .lock()
             .map_err(|_| Error::from_reason("DB Lock failed"))?;
-        
+
         let table_count: i32 = conn
             .query_row(
                 "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
@@ -388,7 +433,7 @@ impl Database {
                 |row| row.get(0),
             )
             .map_err(to_napi_error)?;
-        
+
         let index_count: i32 = conn
             .query_row(
                 "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name NOT LIKE 'sqlite_%'",
@@ -396,19 +441,19 @@ impl Database {
                 |row| row.get(0),
             )
             .map_err(to_napi_error)?;
-        
+
         let page_count: i32 = conn
             .query_row("PRAGMA page_count", [], |row| row.get(0))
             .map_err(to_napi_error)?;
-        
+
         let page_size: i32 = conn
             .query_row("PRAGMA page_size", [], |row| row.get(0))
             .map_err(to_napi_error)?;
-        
+
         let version: String = conn
             .query_row("SELECT sqlite_version()", [], |row| row.get(0))
             .map_err(to_napi_error)?;
-        
+
         Ok(serde_json::json!({
             "table_count": table_count,
             "index_count": index_count,

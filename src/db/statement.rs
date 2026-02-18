@@ -36,7 +36,8 @@ impl Statement {
 
         let column_names: Vec<String> = stmt.column_names().iter().map(|s| s.to_string()).collect();
         let rusqlite_params = convert_params(&env, params)?;
-        let params_refs: Vec<&dyn ToSql> = rusqlite_params.iter().map(|p| p as &dyn ToSql).collect();
+        let params_refs: Vec<&dyn ToSql> =
+            rusqlite_params.iter().map(|p| p as &dyn ToSql).collect();
 
         let mut rows = stmt
             .query(params_from_iter(params_refs))
@@ -67,7 +68,8 @@ impl Statement {
 
         let column_names: Vec<String> = stmt.column_names().iter().map(|s| s.to_string()).collect();
         let rusqlite_params = convert_params(&env, params)?;
-        let params_refs: Vec<&dyn ToSql> = rusqlite_params.iter().map(|p| p as &dyn ToSql).collect();
+        let params_refs: Vec<&dyn ToSql> =
+            rusqlite_params.iter().map(|p| p as &dyn ToSql).collect();
 
         let mut rows = stmt
             .query(params_from_iter(params_refs))
@@ -95,7 +97,8 @@ impl Statement {
         let mut stmt = conn.prepare_cached(&self.sql).map_err(to_napi_error)?;
 
         let rusqlite_params = convert_params(&env, params)?;
-        let params_refs: Vec<&dyn ToSql> = rusqlite_params.iter().map(|p| p as &dyn ToSql).collect();
+        let params_refs: Vec<&dyn ToSql> =
+            rusqlite_params.iter().map(|p| p as &dyn ToSql).collect();
 
         let changes = stmt
             .execute(params_from_iter(params_refs))
@@ -118,7 +121,8 @@ impl Statement {
 
         let column_count = stmt.column_count();
         let rusqlite_params = convert_params(&env, params)?;
-        let params_refs: Vec<&dyn ToSql> = rusqlite_params.iter().map(|p| p as &dyn ToSql).collect();
+        let params_refs: Vec<&dyn ToSql> =
+            rusqlite_params.iter().map(|p| p as &dyn ToSql).collect();
 
         let mut rows = stmt
             .query(params_from_iter(params_refs))

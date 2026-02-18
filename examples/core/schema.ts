@@ -1,3 +1,10 @@
+import { 
+  getSqliteType, 
+  type FieldType,
+  type ModelDefinition, 
+  type ModelFieldConfig 
+} from "./constants.js";
+
 /**
  * Schema - ORM-style database schema builder
  * 
@@ -26,13 +33,6 @@
  *       created_at: StandardFields.CreatedAt,
  *     });
  */
-
-import { 
-  getSqliteType, 
-  type FieldType,
-  type ModelDefinition, 
-  type ModelFieldConfig 
-} from "./constants.js";
 
 export interface ColumnDefinition {
   name: string;
@@ -328,8 +328,28 @@ export class Schema {
   }
 
   // ============================================
+  // Helper Functions
+  // ============================================
+
+  /**
+   * Check if a value is an SQL expression that should not be quoted
+   * Examples: datetime('now'), CURRENT_TIMESTAMP, (strftime('%s', 'now')), etc.
+   */
+  private isSqlExpression(value: any): boolean {
+    if (typeof value !== 'string') return false;
+    // Starts with parenthesis (expression)
+    if (value.startsWith('(')) return true;
+    // SQL function calls like datetime('now'), strftime('%s', 'now')
+    if (/^[a-z_]+\s*\(/i.test(value)) return true;
+    // SQL keywords like CURRENT_TIMESTAMP, CURRENT_DATE, CURRENT_TIME, NULL
+    if (/^(CURRENT_TIMESTAMP|CURRENT_DATE|CURRENT_TIME|NULL)$/i.test(value)) return true;
+    return false;
+  }
+
+  // ============================================
   // Métodos de generación SQL
   // ============================================
+
 
   toSQL(): string {
     const lines: string[] = [];
@@ -357,9 +377,12 @@ export class Schema {
       }
       if (col.defaultValue !== undefined) {
         const defaultVal = col.defaultValue;
-        // Si es una expresión SQL (comienza con paréntesis), no usar comillas
-        if (typeof defaultVal === "string" && defaultVal.startsWith("(")) {
-          line += ` DEFAULT ${defaultVal}`;
+        // Si es una expresión SQL (función o expresión entre paréntesis), no usar comillas
+        // SQLite requiere paréntesis alrededor de expresiones en DEFAULT
+        if (typeof defaultVal === "string" && this.isSqlExpression(defaultVal)) {
+          // Si ya tiene paréntesis externos, usarlo tal cual; si no, agregar paréntesis
+          const expr = defaultVal.startsWith("(") ? defaultVal : `(${defaultVal})`;
+          line += ` DEFAULT ${expr}`;
         } else if (typeof defaultVal === "string") {
           line += ` DEFAULT '${defaultVal}'`;
         } else {

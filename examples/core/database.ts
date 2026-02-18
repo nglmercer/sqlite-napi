@@ -19,6 +19,20 @@
 
 import { Schema, SchemaDefinition } from "./schema.js";
 
+/**
+ * Check if a string is a SQL expression that should not be quoted
+ * Examples: datetime('now'), CURRENT_TIMESTAMP, (strftime('%s', 'now')), etc.
+ */
+function isSqlExpression(value: string): boolean {
+  // Starts with parenthesis (expression)
+  if (value.startsWith("(")) return true;
+  // SQL function calls like datetime('now'), strftime('%s', 'now')
+  if (/^[a-z_]+\s*\(/i.test(value)) return true;
+  // SQL keywords like CURRENT_TIMESTAMP, CURRENT_DATE, CURRENT_TIME, NULL
+  if (/^(CURRENT_TIMESTAMP|CURRENT_DATE|CURRENT_TIME|NULL)$/i.test(value)) return true;
+  return false;
+}
+
 export interface Migration {
   version: number;
   name: string;
@@ -103,9 +117,12 @@ export class SQLiteSchema {
       }
       if (col.defaultValue !== undefined) {
         const defaultVal = col.defaultValue;
-        // Si es una expresión SQL (comienza con paréntesis), no usar comillas
-        if (typeof defaultVal === "string" && defaultVal.startsWith("(")) {
-          line += ` DEFAULT ${defaultVal}`;
+        // Si es una expresión SQL (función o expresión entre paréntesis), no usar comillas
+        // SQLite requiere paréntesis alrededor de expresiones en DEFAULT
+        if (typeof defaultVal === "string" && isSqlExpression(defaultVal)) {
+          // Si ya tiene paréntesis externos, usarlo tal cual; si no, agregar paréntesis
+          const expr = defaultVal.startsWith("(") ? defaultVal : `(${defaultVal})`;
+          line += ` DEFAULT ${expr}`;
         } else if (typeof defaultVal === "string") {
           line += ` DEFAULT '${defaultVal}'`;
         } else {

@@ -102,14 +102,23 @@ jobs:
         with:
           name: bindings-${{ matrix.artifact_suffix }}
           path: |
-            dist/${{ matrix.artifact_suffix }}/*.node
+            dist/${{ matrix.target }}/*.node
             package.json
           retention-days: 1
+          if-no-files-found: error
+          include-hidden-files: true
 
       - name: Verify artifact content
+        if: matrix.os != 'windows-latest'
         run: |
           echo "Checking uploaded files..."
-          ls -la dist/${{ matrix.artifact_suffix }}/
+          ls -la dist/${{ matrix.target }}/
+
+      - name: Verify artifact content (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          echo "Checking uploaded files..."
+          Get-ChildItem -Path "dist/${{ matrix.target }}" -Force
 
   release:
     name: Create Release
@@ -129,13 +138,23 @@ jobs:
       - name: Display structure of downloaded files
         run: ls -R dist
 
+      - name: Organize artifacts
+        run: |
+          # Move .node files from nested dist directories to artifact root
+          for artifact_dir in dist/bindings-*/; do
+            # Find and move .node files from nested dist/ directories
+            find "$artifact_dir" -name "*.node" -exec mv {} "$artifact_dir" \;
+            # Remove empty nested directories
+            find "$artifact_dir" -type d -empty -delete
+          done
+          ls -R dist
+
       - name: Generate checksums
         run: |
           cd dist
           # Create checksums for all platform binaries
           echo "Creating checksums..."
           
-          # Linux
           cat << 'EOF' > checksums.txt
           # sqlite-napi checksums
           # Version: ${{ github.ref_name }}

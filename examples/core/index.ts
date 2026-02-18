@@ -64,14 +64,3 @@ export type {
   ModelField,
   SchemaOptions,
 } from "./constants.js";
-
-// Zod utilities
-export {
-  createZodFromJSON,
-  createZodFromSchema,
-  createZodFromColumns,
-  createZodInputSchema,
-  createZodWhereSchema,
-  createZodUniqueSchema,
-} from "./zod.js";
-export type { ZodSchemaOptions } from "./zod.js";

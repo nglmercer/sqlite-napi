@@ -18,20 +18,7 @@
  */
 
 import { Schema, SchemaDefinition } from "./schema.js";
-
-/**
- * Check if a string is a SQL expression that should not be quoted
- * Examples: datetime('now'), CURRENT_TIMESTAMP, (strftime('%s', 'now')), etc.
- */
-function isSqlExpression(value: string): boolean {
-  // Starts with parenthesis (expression)
-  if (value.startsWith("(")) return true;
-  // SQL function calls like datetime('now'), strftime('%s', 'now')
-  if (/^[a-z_]+\s*\(/i.test(value)) return true;
-  // SQL keywords like CURRENT_TIMESTAMP, CURRENT_DATE, CURRENT_TIME, NULL
-  if (/^(CURRENT_TIMESTAMP|CURRENT_DATE|CURRENT_TIME|NULL)$/i.test(value)) return true;
-  return false;
-}
+import { isSqlExpression } from "../../index.js";
 
 export interface Migration {
   version: number;

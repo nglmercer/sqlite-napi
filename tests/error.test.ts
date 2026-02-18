@@ -15,8 +15,10 @@ describe("SQLite NAPI - Error Handling", () => {
   });
 
   test("throws on invalid SQL in query", () => {
+    // Error occurs at execution time, not at query creation
+    const stmt = db.query("SELECT FROM INVALID");
     expect(() => {
-      db.query("SELECT FROM INVALID");
+      stmt.all();
     }).toThrow();
   });
 
@@ -53,16 +55,20 @@ describe("SQLite NAPI - Error Handling", () => {
   });
 
   test("throws on table not found", () => {
+    // Error occurs at execution time, not at query creation
+    const stmt = db.query("SELECT * FROM nonexistent_table");
     expect(() => {
-      db.query("SELECT * FROM nonexistent_table");
+      stmt.all();
     }).toThrow();
   });
 
   test("throws on column not found", () => {
     db.exec("CREATE TABLE test (id INTEGER PRIMARY KEY)");
     
+    // Error occurs at execution time, not at query creation
+    const stmt = db.query("SELECT nonexistent_column FROM test");
     expect(() => {
-      db.query("SELECT nonexistent_column FROM test");
+      stmt.all();
     }).toThrow();
   });
 

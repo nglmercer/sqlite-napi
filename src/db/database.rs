@@ -1,6 +1,6 @@
 //! Database module - provides the Database struct for SQLite connections
 
-use crate::db::convert_params;
+use crate::db::convert_params_container;
 use crate::error::to_napi_error;
 use crate::models::{Migration, QueryResult};
 use napi::bindgen_prelude::*;
@@ -164,13 +164,16 @@ impl Database {
     /// Prepare a SQL statement for execution
     #[napi]
     pub fn query(&self, sql: String) -> Result<Statement> {
-        {
-            let conn = self
-                .conn
-                .lock()
-                .map_err(|_| Error::from_reason("DB Lock failed"))?;
-            conn.prepare(&sql).map_err(to_napi_error)?;
-        }
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| Error::from_reason("DB Lock failed"))?;
+        
+        // Prepare statement to validate SQL syntax
+        // This will throw for invalid SQL at query() time
+        let stmt = conn.prepare(&sql).map_err(to_napi_error)?;
+        drop(stmt);
+        
         Ok(Statement::new(sql, self.conn.clone()))
     }
 
@@ -181,11 +184,26 @@ impl Database {
             .conn
             .lock()
             .map_err(|_| Error::from_reason("DB Lock failed"))?;
-        let rusqlite_params = convert_params(&env, params)?;
-        let params_refs: Vec<&dyn ToSql> =
-            rusqlite_params.iter().map(|p| p as &dyn ToSql).collect();
-        conn.execute(&sql, params_refs.as_slice())
-            .map_err(to_napi_error)?;
+        
+        let params_container = convert_params_container(&env, params)?;
+        
+        match params_container {
+            crate::db::ParamsContainer::Positional(positional_params) => {
+                let params_refs: Vec<&dyn ToSql> =
+                    positional_params.iter().map(|p| p as &dyn ToSql).collect();
+                conn.execute(&sql, params_refs.as_slice())
+                    .map_err(to_napi_error)?;
+            }
+            crate::db::ParamsContainer::Named(named_params) => {
+                let mut named_params_refs: Vec<(&str, &dyn ToSql)> = Vec::new();
+                for (key, param) in named_params.iter() {
+                    named_params_refs.push((key.as_str(), param as &dyn ToSql));
+                }
+                conn.execute(&sql, named_params_refs.as_slice())
+                    .map_err(to_napi_error)?;
+            }
+        }
+        
         Ok(QueryResult {
             changes: conn.changes() as u32,
             last_insert_rowid: conn.last_insert_rowid(),
@@ -804,38 +822,119 @@ impl Database {
             .map_err(|_| Error::from_reason("DB Lock failed"))?;
         if let Some(val) = value {
             let env = Env::from_raw(val.env());
-            let rusqlite_params = convert_params(&env, Some(val))?;
-            if rusqlite_params.len() == 1 {
-                match &rusqlite_params[0] {
-                    crate::db::Param::Int(i) => {
-                        conn.execute(&format!("PRAGMA {} = {}", name, i), [])
-                            .map_err(to_napi_error)?;
-                    }
-                    crate::db::Param::Text(s) => {
-                        conn.execute(&format!("PRAGMA {} = {}", name, s), [])
-                            .map_err(to_napi_error)?;
-                    }
-                    _ => {
-                        return Err(Error::from_reason("Invalid pragma value type"));
+            let params_container = convert_params_container(&env, Some(val))?;
+            
+            match params_container {
+                crate::db::ParamsContainer::Positional(positional_params) => {
+                    if positional_params.len() == 1 {
+                        match &positional_params[0] {
+                            crate::db::Param::Int(i) => {
+                                // Check if this pragma returns results (e.g., busy_timeout)
+                                // Try query_row first, if it fails use execute
+                                let pragma_name_lower = name.to_lowercase();
+                                if pragma_name_lower == "busy_timeout" {
+                                    // busy_timeout returns an integer
+                                    let result: i64 = conn.query_row(
+                                        &format!("PRAGMA {} = {}", name, i),
+                                        [],
+                                        |row| row.get(0),
+                                    ).map_err(to_napi_error)?;
+                                    return Ok(serde_json::Value::Number(result.into()));
+                                }
+                                // Execute the pragma (integer pragmas don't return results)
+                                conn.execute(&format!("PRAGMA {} = {}", name, i), [])
+                                    .map_err(to_napi_error)?;
+                            }
+                            crate::db::Param::Text(s) => {
+                                // String pragmas like journal_mode return a result
+                                let result: String = conn.query_row(
+                                    &format!("PRAGMA {} = '{}'", name, s),
+                                    [],
+                                    |row| row.get(0),
+                                ).map_err(to_napi_error)?;
+                                return Ok(serde_json::Value::String(result));
+                            }
+                            crate::db::Param::Float(f) => {
+                                // For Float, we need to check if it's a whole number
+                                if *f == f.floor() && f.abs() < (i64::MAX as f64) && f.abs() < (i64::MAX as f64) {
+                                    conn.execute(&format!("PRAGMA {} = {}", name, *f as i64), [])
+                                        .map_err(to_napi_error)?;
+                                } else {
+                                    conn.execute(&format!("PRAGMA {} = {}", name, *f), [])
+                                        .map_err(to_napi_error)?;
+                                }
+                            }
+                            _ => {
+                                return Err(Error::from_reason("Invalid pragma value type"));
+                            }
+                        }
+                    } else {
+                        return Err(Error::from_reason("Invalid pragma value"));
                     }
                 }
-            } else {
-                return Err(Error::from_reason("Invalid pragma value"));
+                crate::db::ParamsContainer::Named(named_params) => {
+                    // Handle named params - get first value
+                    let first_value = named_params.values().next();
+                    if let Some(param) = first_value {
+                        match param {
+                            crate::db::Param::Int(i) => {
+                                conn.execute(&format!("PRAGMA {} = {}", name, i), [])
+                                    .map_err(to_napi_error)?;
+                            }
+                            crate::db::Param::Text(s) => {
+                                let result: String = conn.query_row(
+                                    &format!("PRAGMA {} = '{}'", name, s),
+                                    [],
+                                    |row| row.get(0),
+                                ).map_err(to_napi_error)?;
+                                return Ok(serde_json::Value::String(result));
+                            }
+                            crate::db::Param::Float(f) => {
+                                if *f == f.floor() && f.abs() < (i64::MAX as f64) {
+                                    conn.execute(&format!("PRAGMA {} = {}", name, *f as i64), [])
+                                        .map_err(to_napi_error)?;
+                                } else {
+                                    conn.execute(&format!("PRAGMA {} = {}", name, *f), [])
+                                        .map_err(to_napi_error)?;
+                                }
+                            }
+                            _ => {
+                                return Err(Error::from_reason("Invalid pragma value type"));
+                            }
+                        }
+                    } else {
+                        return Err(Error::from_reason("Invalid pragma value"));
+                    }
+                }
             }
+            
+            // Read back the pragma value after setting it
             let mut stmt = conn
                 .prepare(&format!("PRAGMA {}", name))
                 .map_err(to_napi_error)?;
-            let result: Vec<serde_json::Value> = stmt
+            let results: Vec<serde_json::Value> = stmt
                 .query_map([], |row| {
-                    Ok(serde_json::Value::String(row.get::<_, String>(0)?))
+                    let val: std::result::Result<String, _> = row.get(0);
+                    if let Ok(s) = val {
+                        Ok(serde_json::Value::String(s))
+                    } else {
+                        let val: std::result::Result<i64, _> = row.get(0);
+                        if let Ok(i) = val {
+                            Ok(serde_json::Value::Number(i.into()))
+                        } else {
+                            Ok(serde_json::Value::Null)
+                        }
+                    }
                 })
                 .map_err(to_napi_error)?
                 .filter_map(|r| r.ok())
                 .collect();
-            if result.len() == 1 {
-                Ok(result[0].clone())
+            if results.len() == 1 {
+                Ok(results[0].clone())
+            } else if results.is_empty() {
+                Ok(serde_json::Value::Null)
             } else {
-                Ok(serde_json::Value::Array(result))
+                Ok(serde_json::Value::Array(results))
             }
         } else {
             let mut stmt = conn
@@ -868,3 +967,4 @@ impl Database {
         }
     }
 }
+

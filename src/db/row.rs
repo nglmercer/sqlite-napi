@@ -7,7 +7,25 @@ use serde_json::{Number, Value};
 pub fn sqlite_to_json(row: &Row, i: usize) -> Result<Value, rusqlite::Error> {
     match row.get_ref(i)? {
         rusqlite::types::ValueRef::Null => Ok(Value::Null),
-        rusqlite::types::ValueRef::Integer(i) => Ok(Value::Number(i.into())),
+        // For integers, check if they fit in JavaScript's safe integer range
+        // If not, convert to Number anyway (JavaScript will lose precision but it's compatible)
+        rusqlite::types::ValueRef::Integer(i) => {
+            // JavaScript's MAX_SAFE_INTEGER is 2^53 - 1
+            const MAX_SAFE_INTEGER: i64 = 9007199254740991;
+            const MIN_SAFE_INTEGER: i64 = -9007199254740991;
+            
+            if i >= MIN_SAFE_INTEGER && i <= MAX_SAFE_INTEGER {
+                // Safe integer - convert directly
+                Ok(Value::Number(i.into()))
+            } else {
+                // Outside safe range - convert to Number (JavaScript will lose precision)
+                // but this maintains backward compatibility
+                let n = i as f64;
+                Ok(Number::from_f64(n)
+                    .map(Value::Number)
+                    .unwrap_or(Value::Null))
+            }
+        }
         rusqlite::types::ValueRef::Real(f) => Ok(Number::from_f64(f)
             .map(Value::Number)
             .unwrap_or(Value::Null)),
@@ -20,3 +38,4 @@ pub fn sqlite_to_json(row: &Row, i: usize) -> Result<Value, rusqlite::Error> {
         ))),
     }
 }
+

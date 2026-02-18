@@ -37,16 +37,31 @@ pub fn js_to_param(val: &Unknown) -> Result<Param> {
         ValueType::Undefined | ValueType::Null => Ok(Param::Null),
         ValueType::Boolean => Ok(Param::Bool(val.coerce_to_bool()?)),
         ValueType::Number => {
+            // Try to get as int32 first - if it fails, get as float
             let num = val.coerce_to_number()?;
-            Ok(Param::Float(num.get_double()?))
+            // Try getting as double first - if it's a float it will work
+            if let Ok(d) = num.get_double() {
+                // Check if it's actually a whole number that fits in i64
+                if d.fract() == 0.0 && d.abs() < (i64::MAX as f64) && d.abs() < (i64::MIN as f64).abs() {
+                    Ok(Param::Int(d as i64))
+                } else {
+                    Ok(Param::Float(d))
+                }
+            } else if let Ok(i) = num.get_int32() {
+                Ok(Param::Int(i as i64))
+            } else {
+                // Fallback - try to get as int64
+                let n = val.coerce_to_number()?;
+                Ok(Param::Float(n.get_double().unwrap_or(0.0)))
+            }
         }
         ValueType::String => {
             let s = val.coerce_to_string()?.into_utf8()?;
             Ok(Param::Text(s.as_str()?.to_string()))
         }
         ValueType::BigInt => {
-            let i = unsafe { val.cast::<BigInt>()?.get_i64() };
-            Ok(Param::Int(i.0))
+            let (value, _) = unsafe { val.cast::<BigInt>()?.get_i64() };
+            Ok(Param::Int(value))
         }
         ValueType::Object => {
             if val.is_buffer()? {
@@ -56,6 +71,26 @@ pub fn js_to_param(val: &Unknown) -> Result<Param> {
                 // Coerces to number to get timestamp
                 let num = val.coerce_to_number()?;
                 Ok(Param::Float(num.get_double()?))
+            } else if val.is_arraybuffer()? || val.is_typedarray()? {
+                // Handle ArrayBuffer and TypedArray (like Uint8Array)
+                let env = Env::from_raw(val.env());
+                let json_value: serde_json::Value = env.from_js_value(*val)?;
+                // Try to convert to blob if it's an array of numbers
+                if let Some(arr) = json_value.as_array() {
+                    let mut bytes = Vec::new();
+                    for item in arr {
+                        if let Some(n) = item.as_i64() {
+                            bytes.push(n as u8);
+                        } else if let Some(n) = item.as_u64() {
+                            bytes.push(n as u8);
+                        } else {
+                            // Not an array of numbers, convert to string
+                            return Ok(Param::Text(json_value.to_string()));
+                        }
+                    }
+                    return Ok(Param::Blob(bytes));
+                }
+                Ok(Param::Text(json_value.to_string()))
             } else {
                 let env = Env::from_raw(val.env());
                 let json_value: serde_json::Value = env.from_js_value(*val)?;

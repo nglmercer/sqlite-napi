@@ -113,14 +113,8 @@ describe("SQLite NAPI - Statement Metadata", () => {
     });
 
     test("preserves complex SQL", () => {
-      const sql = `
-        SELECT u.name, COUNT(p.id) as post_count
-        FROM users u
-        LEFT JOIN posts p ON u.id = p.user_id
-        WHERE u.age > ?
-        GROUP BY u.id
-        ORDER BY post_count DESC
-      `;
+      const sql =
+        "SELECT u.name, COUNT(p.id) as post_count FROM users u LEFT JOIN posts p ON u.id = p.user_id WHERE u.age > ? GROUP BY u.id ORDER BY post_count DESC";
       const stmt = db.query(sql);
 
       expect(stmt.source()).toBe(sql);

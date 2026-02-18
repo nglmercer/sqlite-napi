@@ -1,6 +1,6 @@
 //! Statement module - provides the Statement struct for prepared SQL statements
 
-use crate::db::convert_params;
+use crate::db::convert_params_container;
 use crate::db::sqlite_to_json;
 use crate::error::to_napi_error;
 use crate::models::QueryResult;
@@ -63,34 +63,59 @@ impl Statement {
             .lock()
             .map_err(|_| Error::from_reason("DB Lock failed"))?;
 
-        // Use prepare instead of prepare_cached to allow named parameter binding
         let mut stmt = conn.prepare(&self.sql).map_err(to_napi_error)?;
 
         let column_names: Vec<String> = stmt.column_names().iter().map(|s| s.to_string()).collect();
         let column_count = stmt.column_count();
 
-        let rusqlite_params = convert_params(&env, params)?;
-        let params_refs: Vec<&dyn ToSql> =
-            rusqlite_params.iter().map(|p| p as &dyn ToSql).collect();
-
-        let mut rows = stmt.query(params_refs.as_slice()).map_err(to_napi_error)?;
-
-        let mut results = Vec::new();
-
-        while let Some(row) = rows.next().map_err(to_napi_error)? {
-            let mut map = serde_json::Map::new();
-            for i in 0..column_count {
-                let val = sqlite_to_json(row, i).map_err(to_napi_error)?;
-                let name = column_names
-                    .get(i)
-                    .cloned()
-                    .unwrap_or_else(|| format!("col_{}", i));
-                map.insert(name, val);
+        let params_container = convert_params_container(&env, params)?;
+        
+        match params_container {
+            crate::db::ParamsContainer::Positional(positional_params) => {
+                let params_refs: Vec<&dyn ToSql> =
+                    positional_params.iter().map(|p| p as &dyn ToSql).collect();
+                let mut rows = stmt.query(params_refs.as_slice()).map_err(to_napi_error)?;
+                let mut results = Vec::new();
+                while let Some(row) = rows.next().map_err(to_napi_error)? {
+                    let mut map = serde_json::Map::new();
+                    for i in 0..column_count {
+                        let val = sqlite_to_json(row, i).map_err(to_napi_error)?;
+                        let name = column_names
+                            .get(i)
+                            .cloned()
+                            .unwrap_or_else(|| format!("col_{}", i));
+                        map.insert(name, val);
+                    }
+                    results.push(serde_json::Value::Object(map));
+                }
+                Ok(serde_json::Value::Array(results))
             }
-            results.push(serde_json::Value::Object(map));
+            crate::db::ParamsContainer::Named(named_params) => {
+                let mut results = Vec::new();
+                // For named params, we need to use a different approach with rusqlite
+                // rusqlite supports named parameters with :name, @name, or $name syntax
+                // We'll convert the named params to rusqlite's named parameter format
+                let mut stmt = conn.prepare(&self.sql).map_err(to_napi_error)?;
+                let mut named_params_refs: Vec<(&str, &dyn ToSql)> = Vec::new();
+                for (key, param) in named_params.iter() {
+                    named_params_refs.push((key.as_str(), param as &dyn ToSql));
+                }
+                let mut rows = stmt.query(named_params_refs.as_slice()).map_err(to_napi_error)?;
+                while let Some(row) = rows.next().map_err(to_napi_error)? {
+                    let mut map = serde_json::Map::new();
+                    for i in 0..column_count {
+                        let val = sqlite_to_json(row, i).map_err(to_napi_error)?;
+                        let name = column_names
+                            .get(i)
+                            .cloned()
+                            .unwrap_or_else(|| format!("col_{}", i));
+                        map.insert(name, val);
+                    }
+                    results.push(serde_json::Value::Object(map));
+                }
+                Ok(serde_json::Value::Array(results))
+            }
         }
-
-        Ok(serde_json::Value::Array(results))
     }
 
     /// Execute query and return first row as object
@@ -106,25 +131,49 @@ impl Statement {
         let column_names: Vec<String> = stmt.column_names().iter().map(|s| s.to_string()).collect();
         let column_count = stmt.column_count();
 
-        let rusqlite_params = convert_params(&env, params)?;
-        let params_refs: Vec<&dyn ToSql> =
-            rusqlite_params.iter().map(|p| p as &dyn ToSql).collect();
-
-        let mut rows = stmt.query(params_refs.as_slice()).map_err(to_napi_error)?;
-
-        if let Some(row) = rows.next().map_err(to_napi_error)? {
-            let mut map = serde_json::Map::new();
-            for i in 0..column_count {
-                let val = sqlite_to_json(row, i).map_err(to_napi_error)?;
-                let name = column_names
-                    .get(i)
-                    .cloned()
-                    .unwrap_or_else(|| format!("col_{}", i));
-                map.insert(name, val);
+        let params_container = convert_params_container(&env, params)?;
+        
+        match params_container {
+            crate::db::ParamsContainer::Positional(positional_params) => {
+                let params_refs: Vec<&dyn ToSql> =
+                    positional_params.iter().map(|p| p as &dyn ToSql).collect();
+                let mut rows = stmt.query(params_refs.as_slice()).map_err(to_napi_error)?;
+                if let Some(row) = rows.next().map_err(to_napi_error)? {
+                    let mut map = serde_json::Map::new();
+                    for i in 0..column_count {
+                        let val = sqlite_to_json(row, i).map_err(to_napi_error)?;
+                        let name = column_names
+                            .get(i)
+                            .cloned()
+                            .unwrap_or_else(|| format!("col_{}", i));
+                        map.insert(name, val);
+                    }
+                    Ok(serde_json::Value::Object(map))
+                } else {
+                    Ok(serde_json::Value::Null)
+                }
             }
-            Ok(serde_json::Value::Object(map))
-        } else {
-            Ok(serde_json::Value::Null)
+            crate::db::ParamsContainer::Named(named_params) => {
+                let mut named_params_refs: Vec<(&str, &dyn ToSql)> = Vec::new();
+                for (key, param) in named_params.iter() {
+                    named_params_refs.push((key.as_str(), param as &dyn ToSql));
+                }
+                let mut rows = stmt.query(named_params_refs.as_slice()).map_err(to_napi_error)?;
+                if let Some(row) = rows.next().map_err(to_napi_error)? {
+                    let mut map = serde_json::Map::new();
+                    for i in 0..column_count {
+                        let val = sqlite_to_json(row, i).map_err(to_napi_error)?;
+                        let name = column_names
+                            .get(i)
+                            .cloned()
+                            .unwrap_or_else(|| format!("col_{}", i));
+                        map.insert(name, val);
+                    }
+                    Ok(serde_json::Value::Object(map))
+                } else {
+                    Ok(serde_json::Value::Null)
+                }
+            }
         }
     }
 
@@ -138,18 +187,34 @@ impl Statement {
 
         let mut stmt = conn.prepare(&self.sql).map_err(to_napi_error)?;
 
-        let rusqlite_params = convert_params(&env, params)?;
-        let params_refs: Vec<&dyn ToSql> =
-            rusqlite_params.iter().map(|p| p as &dyn ToSql).collect();
-
-        let changes = stmt
-            .execute(params_refs.as_slice())
-            .map_err(to_napi_error)?;
-
-        Ok(QueryResult {
-            changes: changes as u32,
-            last_insert_rowid: conn.last_insert_rowid(),
-        })
+        let params_container = convert_params_container(&env, params)?;
+        
+        match params_container {
+            crate::db::ParamsContainer::Positional(positional_params) => {
+                let params_refs: Vec<&dyn ToSql> =
+                    positional_params.iter().map(|p| p as &dyn ToSql).collect();
+                let changes = stmt
+                    .execute(params_refs.as_slice())
+                    .map_err(to_napi_error)?;
+                Ok(QueryResult {
+                    changes: changes as u32,
+                    last_insert_rowid: conn.last_insert_rowid(),
+                })
+            }
+            crate::db::ParamsContainer::Named(named_params) => {
+                let mut named_params_refs: Vec<(&str, &dyn ToSql)> = Vec::new();
+                for (key, param) in named_params.iter() {
+                    named_params_refs.push((key.as_str(), param as &dyn ToSql));
+                }
+                let changes = stmt
+                    .execute(named_params_refs.as_slice())
+                    .map_err(to_napi_error)?;
+                Ok(QueryResult {
+                    changes: changes as u32,
+                    last_insert_rowid: conn.last_insert_rowid(),
+                })
+            }
+        }
     }
 
     /// Execute query and return all rows as arrays (values)
@@ -161,27 +226,44 @@ impl Statement {
             .map_err(|_| Error::from_reason("DB Lock failed"))?;
 
         let mut stmt = conn.prepare(&self.sql).map_err(to_napi_error)?;
-
         let column_count = stmt.column_count();
 
-        let rusqlite_params = convert_params(&env, params)?;
-        let params_refs: Vec<&dyn ToSql> =
-            rusqlite_params.iter().map(|p| p as &dyn ToSql).collect();
-
-        let mut rows = stmt.query(params_refs.as_slice()).map_err(to_napi_error)?;
-
-        let mut results = Vec::new();
-
-        while let Some(row) = rows.next().map_err(to_napi_error)? {
-            let mut row_arr = Vec::new();
-            for i in 0..column_count {
-                let val = sqlite_to_json(row, i).map_err(to_napi_error)?;
-                row_arr.push(val);
+        let params_container = convert_params_container(&env, params)?;
+        
+        match params_container {
+            crate::db::ParamsContainer::Positional(positional_params) => {
+                let params_refs: Vec<&dyn ToSql> =
+                    positional_params.iter().map(|p| p as &dyn ToSql).collect();
+                let mut rows = stmt.query(params_refs.as_slice()).map_err(to_napi_error)?;
+                let mut results = Vec::new();
+                while let Some(row) = rows.next().map_err(to_napi_error)? {
+                    let mut row_arr = Vec::new();
+                    for i in 0..column_count {
+                        let val = sqlite_to_json(row, i).map_err(to_napi_error)?;
+                        row_arr.push(val);
+                    }
+                    results.push(serde_json::Value::Array(row_arr));
+                }
+                Ok(serde_json::Value::Array(results))
             }
-            results.push(serde_json::Value::Array(row_arr));
+            crate::db::ParamsContainer::Named(named_params) => {
+                let mut named_params_refs: Vec<(&str, &dyn ToSql)> = Vec::new();
+                for (key, param) in named_params.iter() {
+                    named_params_refs.push((key.as_str(), param as &dyn ToSql));
+                }
+                let mut rows = stmt.query(named_params_refs.as_slice()).map_err(to_napi_error)?;
+                let mut results = Vec::new();
+                while let Some(row) = rows.next().map_err(to_napi_error)? {
+                    let mut row_arr = Vec::new();
+                    for i in 0..column_count {
+                        let val = sqlite_to_json(row, i).map_err(to_napi_error)?;
+                        row_arr.push(val);
+                    }
+                    results.push(serde_json::Value::Array(row_arr));
+                }
+                Ok(serde_json::Value::Array(results))
+            }
         }
-
-        Ok(serde_json::Value::Array(results))
     }
 
     /// Finalize the statement, releasing resources
@@ -200,30 +282,53 @@ impl Statement {
             .map_err(|_| Error::from_reason("DB Lock failed"))?;
 
         let mut stmt = conn.prepare(&self.sql).map_err(to_napi_error)?;
-
         let column_names: Vec<String> = stmt.column_names().iter().map(|s| s.to_string()).collect();
         let column_count = stmt.column_count();
 
-        let rusqlite_params = convert_params(&env, params)?;
-        let params_refs: Vec<&dyn ToSql> =
-            rusqlite_params.iter().map(|p| p as &dyn ToSql).collect();
-
-        let mut rows_iter = stmt.query(params_refs.as_slice()).map_err(to_napi_error)?;
-
-        // Pre-fetch all rows since we need to release the connection lock
-        let mut rows = Vec::new();
-        while let Some(row) = rows_iter.next().map_err(to_napi_error)? {
-            let mut map = serde_json::Map::new();
-            for i in 0..column_count {
-                let val = sqlite_to_json(row, i).map_err(to_napi_error)?;
-                let name = column_names
-                    .get(i)
-                    .cloned()
-                    .unwrap_or_else(|| format!("col_{}", i));
-                map.insert(name, val);
+        let params_container = convert_params_container(&env, params)?;
+        
+        let rows: Vec<serde_json::Value> = match params_container {
+            crate::db::ParamsContainer::Positional(positional_params) => {
+                let params_refs: Vec<&dyn ToSql> =
+                    positional_params.iter().map(|p| p as &dyn ToSql).collect();
+                let mut rows_iter = stmt.query(params_refs.as_slice()).map_err(to_napi_error)?;
+                let mut rows = Vec::new();
+                while let Some(row) = rows_iter.next().map_err(to_napi_error)? {
+                    let mut map = serde_json::Map::new();
+                    for i in 0..column_count {
+                        let val = sqlite_to_json(row, i).map_err(to_napi_error)?;
+                        let name = column_names
+                            .get(i)
+                            .cloned()
+                            .unwrap_or_else(|| format!("col_{}", i));
+                        map.insert(name, val);
+                    }
+                    rows.push(serde_json::Value::Object(map));
+                }
+                rows
             }
-            rows.push(serde_json::Value::Object(map));
-        }
+            crate::db::ParamsContainer::Named(named_params) => {
+                let mut named_params_refs: Vec<(&str, &dyn ToSql)> = Vec::new();
+                for (key, param) in named_params.iter() {
+                    named_params_refs.push((key.as_str(), param as &dyn ToSql));
+                }
+                let mut rows_iter = stmt.query(named_params_refs.as_slice()).map_err(to_napi_error)?;
+                let mut rows = Vec::new();
+                while let Some(row) = rows_iter.next().map_err(to_napi_error)? {
+                    let mut map = serde_json::Map::new();
+                    for i in 0..column_count {
+                        let val = sqlite_to_json(row, i).map_err(to_napi_error)?;
+                        let name = column_names
+                            .get(i)
+                            .cloned()
+                            .unwrap_or_else(|| format!("col_{}", i));
+                        map.insert(name, val);
+                    }
+                    rows.push(serde_json::Value::Object(map));
+                }
+                rows
+            }
+        };
 
         Ok(Iter::new(rows, column_names))
     }

@@ -57,7 +57,7 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libasound2-dev libpkgconf-dev gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -69,10 +69,6 @@ jobs:
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
           targets: ${{ matrix.target }}
-
-      - name: Add target (Linux ARM64)
-        if: matrix.target == 'aarch64-unknown-linux-gnu'
-        run: rustup target add aarch64-unknown-linux-gnu
 
       - name: Cache Rust dependencies
         uses: actions/cache@v4
@@ -89,7 +85,7 @@ jobs:
         run: npm install
 
       - name: Build
-        run: npm run build -- --target ${{ matrix.target }}
+        run: npm run build -- --target ${{ matrix.target }} --output-dir dist/${{ matrix.target }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
@@ -97,28 +93,33 @@ jobs:
           CXX_aarch64_unknown_linux_gnu: aarch64-linux-gnu-g++
           AR_aarch64_unknown_linux_gnu: aarch64-linux-gnu-ar
 
+      - name: Verify artifact content
+        if: matrix.os != 'windows-latest'
+        run: |
+          echo "Checking built files..."
+          ls -la dist/${{ matrix.target }}/
+          test -n "$(find dist/${{ matrix.target }} -name '*.node' -print -quit)" || (echo "ERROR: no .node file found!" && exit 1)
+
+      - name: Verify artifact content (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          echo "Checking built files..."
+          $files = Get-ChildItem -Path "dist/${{ matrix.target }}" -Filter "*.node" -Force
+          if ($files.Count -eq 0) {
+            Write-Error "ERROR: no .node file found!"
+            exit 1
+          }
+          $files | Format-List
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: bindings-${{ matrix.artifact_suffix }}
-          path: |
-            dist/${{ matrix.target }}/*.node
-            package.json
+          path: dist/${{ matrix.target }}/*.node
           retention-days: 1
           if-no-files-found: error
           include-hidden-files: true
-
-      - name: Verify artifact content
-        if: matrix.os != 'windows-latest'
-        run: |
-          echo "Checking uploaded files..."
-          ls -la dist/${{ matrix.target }}/
-
-      - name: Verify artifact content (Windows)
-        if: matrix.os == 'windows-latest'
-        run: |
-          echo "Checking uploaded files..."
-          Get-ChildItem -Path "dist/${{ matrix.target }}" -Force
 
   release:
     name: Create Release
@@ -138,38 +139,25 @@ jobs:
       - name: Display structure of downloaded files
         run: ls -R dist
 
-      - name: Organize artifacts
-        run: |
-          # Move .node files from nested dist directories to artifact root
-          for artifact_dir in dist/bindings-*/; do
-            # Find and move .node files from nested dist/ directories
-            find "$artifact_dir" -name "*.node" -exec mv {} "$artifact_dir" \;
-            # Remove empty nested directories
-            find "$artifact_dir" -type d -empty -delete
-          done
-          ls -R dist
-
       - name: Generate checksums
         run: |
           cd dist
-          # Create checksums for all platform binaries
           echo "Creating checksums..."
-          
+
           cat << 'EOF' > checksums.txt
           # sqlite-napi checksums
           # Version: ${{ github.ref_name }}
-          
+
           EOF
-          
+
           for dir in bindings-*/; do
-            platform=$(basename "$dir" | sed 's/bindings-//')
             for file in "$dir"*.node; do
               if [ -f "$file" ]; then
                 sha256sum "$file" | tee -a checksums.txt
               fi
             done
           done
-          
+
           cat checksums.txt
 
       - name: Create Release

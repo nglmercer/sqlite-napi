@@ -1,0 +1,9 @@
+# sqlite-napi checksums
+# Version: v0.0.4
+
+a1a71a3dfe36f1ab9aeaf8a61c3afabe65c2a86904d682c95a49124441d4ab1c  bindings-darwin-arm64/sqlite-napi.darwin-arm64.node
+a4c9e23e5575a2c61f1c4a1285b37b87d74d4b2073e0924966eda3a28e7b941c  bindings-darwin-x64/sqlite-napi.darwin-x64.node
+42cb4924de1ad700580b7d050ffb3b20b9229ad6972eac09d32eaf4933b99bec  bindings-linux-arm64/sqlite-napi.linux-arm64-gnu.node
+f868f745b2dfa656d9312a0b797a12306c3eaabd091f13d4540945841419bf10  bindings-linux-x64/sqlite-napi.linux-x64-gnu.node
+a0895e3e579a03c45ce5652ff2f0ea94753733ab242606688d69c64e558353ad  bindings-win32-ia32/sqlite-napi.win32-ia32-msvc.node
+abef0bdc9a14f56230403994d793c387b7ff32ae8255bf7bed2d8607988f7feb  bindings-win32-x64/sqlite-napi.win32-x64-msvc.node

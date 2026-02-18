@@ -82,7 +82,7 @@ jobs:
 
       - name: Setup Cross toolchain
         if: matrix.target == 'aarch64-unknown-linux-gnu'
-        uses: arduino/setup-protoc@c93b6a6cf201d4e06579ef9094c5bd4a5194c84a
+        uses: arduino/setup-protoc@v1
         with:
           version: "3"
 

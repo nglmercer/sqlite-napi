@@ -5,7 +5,10 @@ use crate::error::to_napi_error;
 use crate::models::{Migration, QueryResult};
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
-use rusqlite::{serialize::OwnedData, Connection, DatabaseName, OpenFlags, ToSql};
+use rusqlite::serialize::OwnedData;
+use rusqlite::Connection;
+use rusqlite::OpenFlags;
+use rusqlite::ToSql;
 
 use std::collections::HashMap;
 use std::sync::atomic::AtomicBool;
@@ -282,7 +285,8 @@ impl Database {
             .lock()
             .map_err(|_| Error::from_reason("DB Lock failed"))?;
         unsafe {
-            conn.load_extension(&path, None).map_err(to_napi_error)?;
+            conn.load_extension(&path, Option::<&str>::None)
+                .map_err(to_napi_error)?;
         }
         Ok(())
     }
@@ -294,7 +298,7 @@ impl Database {
             .conn
             .lock()
             .map_err(|_| Error::from_reason("DB Lock failed"))?;
-        let data = conn.serialize(DatabaseName::Main).map_err(to_napi_error)?;
+        let data = conn.serialize("main").map_err(to_napi_error)?;
         Ok(Buffer::from(data.to_vec()))
     }
 
@@ -316,7 +320,7 @@ impl Database {
         let owned_data = unsafe {
             OwnedData::from_raw_nonnull(std::ptr::NonNull::new_unchecked(sqlite_ptr), len)
         };
-        conn.deserialize(DatabaseName::Main, owned_data, read_only.unwrap_or(false))
+        conn.deserialize("main", owned_data, read_only.unwrap_or(false))
             .map_err(to_napi_error)?;
         Ok(())
     }
@@ -761,7 +765,7 @@ impl Database {
             .lock()
             .map_err(|_| Error::from_reason("DB Lock failed"))?;
         conn.create_scalar_function(
-            &name,
+            name.as_str(),
             -1,
             rusqlite::functions::FunctionFlags::SQLITE_UTF8
                 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC,
@@ -793,7 +797,7 @@ impl Database {
             .conn
             .lock()
             .map_err(|_| Error::from_reason("DB Lock failed"))?;
-        conn.create_collation(&name, |a: &str, b: &str| a.cmp(b))
+        conn.create_collation(name.as_str(), |a: &str, b: &str| a.cmp(b))
             .map_err(to_napi_error)?;
         let mut colls = collations
             .lock()

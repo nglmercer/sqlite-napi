@@ -1,6 +1,6 @@
 {
   "name": "sqlite-napi",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "High-performance SQLite library for Node.js and Bun that mirrors the bun:sqlite API",
   "keywords": [
     "sqlite",
@@ -33,6 +33,9 @@
   "types": "dist/index.d.ts",
   "files": [
     "dist/",
+    "index.js",
+    "index.d.ts",
+    "**.node",
     "README.md",
     "LICENSE"
   ],

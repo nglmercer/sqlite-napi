@@ -102,7 +102,7 @@ impl SqliteType {
     /// Check if a type name is a valid SQLite type
     #[napi]
     pub fn is_valid_type(type_name: String) -> bool {
-        SqliteType::from_str(&type_name).is_some()
+        SqliteType::parse_type(&type_name).is_some()
     }
 
     /// Get the SQLite type from a type name string
@@ -127,7 +127,7 @@ impl SqliteType {
             }
         } else {
             // Try to parse as native SQLite type
-            if SqliteType::from_str(&type_name).is_some() {
+            if SqliteType::parse_type(&type_name).is_some() {
                 TypeMapping {
                     sqlite_type: type_name.to_uppercase(),
                     valid: true,
@@ -307,7 +307,7 @@ pub fn validate_column_definition(
     }
 
     // Validate column type
-    if !SqliteType::from_str(&column_type).is_some() {
+    if SqliteType::parse_type(&column_type).is_none() {
         issues.push(format!("Unknown SQLite type: {}", column_type));
     }
 
@@ -468,33 +468,33 @@ mod tests {
 
     // ============== SqliteType tests ==============
     #[test]
-    fn test_from_str_valid_types() {
-        assert_eq!(SqliteType::from_str("INTEGER"), Some(SqliteType::Integer));
-        assert_eq!(SqliteType::from_str("TEXT"), Some(SqliteType::Text));
-        assert_eq!(SqliteType::from_str("REAL"), Some(SqliteType::Real));
-        assert_eq!(SqliteType::from_str("BLOB"), Some(SqliteType::Blob));
-        assert_eq!(SqliteType::from_str("NULL"), Some(SqliteType::Null));
+    fn test_parse_type_valid_types() {
+        assert_eq!(SqliteType::parse_type("INTEGER"), Some(SqliteType::Integer));
+        assert_eq!(SqliteType::parse_type("TEXT"), Some(SqliteType::Text));
+        assert_eq!(SqliteType::parse_type("REAL"), Some(SqliteType::Real));
+        assert_eq!(SqliteType::parse_type("BLOB"), Some(SqliteType::Blob));
+        assert_eq!(SqliteType::parse_type("NULL"), Some(SqliteType::Null));
     }
 
     #[test]
-    fn test_from_str_case_insensitive() {
-        assert_eq!(SqliteType::from_str("integer"), Some(SqliteType::Integer));
-        assert_eq!(SqliteType::from_str("Integer"), Some(SqliteType::Integer));
+    fn test_parse_type_case_insensitive() {
+        assert_eq!(SqliteType::parse_type("integer"), Some(SqliteType::Integer));
+        assert_eq!(SqliteType::parse_type("Integer"), Some(SqliteType::Integer));
     }
 
     #[test]
-    fn test_from_str_aliases() {
-        assert_eq!(SqliteType::from_str("INT"), Some(SqliteType::Integer));
-        assert_eq!(SqliteType::from_str("TINYINT"), Some(SqliteType::Integer));
-        assert_eq!(SqliteType::from_str("BIGINT"), Some(SqliteType::Integer));
-        assert_eq!(SqliteType::from_str("DOUBLE"), Some(SqliteType::Real));
-        assert_eq!(SqliteType::from_str("VARCHAR"), Some(SqliteType::Text));
+    fn test_parse_type_aliases() {
+        assert_eq!(SqliteType::parse_type("INT"), Some(SqliteType::Integer));
+        assert_eq!(SqliteType::parse_type("TINYINT"), Some(SqliteType::Integer));
+        assert_eq!(SqliteType::parse_type("BIGINT"), Some(SqliteType::Integer));
+        assert_eq!(SqliteType::parse_type("DOUBLE"), Some(SqliteType::Real));
+        assert_eq!(SqliteType::parse_type("VARCHAR"), Some(SqliteType::Text));
     }
 
     #[test]
-    fn test_from_str_invalid() {
-        assert_eq!(SqliteType::from_str("INVALID"), None);
-        assert_eq!(SqliteType::from_str(""), None);
+    fn test_parse_type_invalid() {
+        assert_eq!(SqliteType::parse_type("INVALID"), None);
+        assert_eq!(SqliteType::parse_type(""), None);
     }
 
     #[test]

@@ -4,11 +4,13 @@
 
 import { Database } from "../index";
 import {
-  SQLiteSchema
+  SQLiteSchema,
+  Schema,
+  StandardFields,
 } from "./core";
 
-function ejemploSchemaDefinition() {
-  console.log("=== EJEMPLO: Definición de Schema ===\n");
+function exampleSchemaDefinition() {
+  console.log("=== Schema ===\n");
 
   const schemaBuilder = new SQLiteSchema();
 
@@ -36,10 +38,10 @@ function ejemploSchemaDefinition() {
 
   const migrations = schemaBuilder.toMigrations();
 
-  console.log("Migraciones generadas:\n");
+  console.log("Generated migrations:\n");
   
   for (const mig of migrations) {
-    console.log(`--- Versión ${mig.version} ---`);
+    console.log(`--- Version ${mig.version} ---`);
     console.log(mig.sql);
     console.log();
   }
@@ -50,8 +52,8 @@ function ejemploSchemaDefinition() {
     db.run(mig.sql);
   }
 
-  console.log("Tablas creadas:", db.getTables());
-  console.log("Versión del schema:", db.getSchemaVersion());
+  console.log("Tables:", db.getTables());
+  console.log("Schema version:", db.getSchemaVersion());
 }
 
 interface UserModel {
@@ -213,8 +215,8 @@ class SQLiteORM {
   }
 }
 
-function ejemploORM() {
-  console.log("\n=== ORM estilo Prisma ===\n");
+function exampleORM() {
+  console.log("\n=== Prisma-style ORM ===\n");
 
   const orm = SQLiteORM.init(":memory:", (s) => {
     s.create("users", (t) => {
@@ -241,25 +243,54 @@ function ejemploORM() {
   const user1Id = orm.users.createUser("alice@example.com", "hash123", "Alice");
   const user2Id = orm.users.createUser("bob@example.com", "hash456", "Bob");
 
-  console.log(`Usuarios creados: ${user1Id}, ${user2Id}`);
+  console.log(`Users created: ${user1Id}, ${user2Id}`);
 
   const alice = orm.users.findByEmail("alice@example.com");
-  console.log("Usuario encontrado:", alice?.email);
+  console.log("User found:", alice?.email);
 
-  const postId = orm.posts.createPost(user1Id, "Mi primer post", "Contenido del post");
-  console.log(`Post creado con ID: ${postId}`);
+  const postId = orm.posts.createPost(user1Id, "My first post", "Post content");
+  console.log(`Post created with ID: ${postId}`);
 
   orm.posts.publish(postId);
-  console.log("Post publicado");
+  console.log("Post published");
 
   const publishedPosts = orm.posts.findPublished();
-  console.log("Posts publicados:", publishedPosts.length);
+  console.log("Published posts:", publishedPosts.length);
 
   const allUsers = orm.users.findAll();
-  console.log("Todos los usuarios:", allUsers.map(u => u.email).join(", "));
+  console.log("All users:", allUsers.map(u => u.email).join(", "));
 }
 
-ejemploSchemaDefinition();
-ejemploORM();
+// ============================================
+// Example: Prisma-like Model Definition
+// ============================================
+function examplePrismaModel() {
+  console.log("\n=== Prisma-like Model Definition ===\n");
 
-console.log("\n✓ Ejemplo completado correctamente");
+  // Using the new .model() method with Prisma-like syntax
+  const schema = new Schema("oauth_tokens")
+    .model({
+      id: StandardFields.UUID,
+      token: { type: String, required: true, unique: true },
+      client_id: { type: String, required: true },
+      user_id: { type: String, required: true },
+      scope: { type: String, default: "" },
+      expires_at: { type: Date, required: true },
+      is_revoked: { type: Boolean, default: false },
+      revoked_at: Date,
+      rotation_count: { type: Number, default: 0 },
+      created_at: StandardFields.CreatedAt,
+    });
+
+  console.log("SQL Schema:");
+  console.log(schema.toSQL());
+  
+  console.log("\nJSON Serialization:");
+  console.log(schema.toJsonString(2));
+}
+
+exampleSchemaDefinition();
+exampleORM();
+examplePrismaModel();
+
+console.log("\n✓ end");

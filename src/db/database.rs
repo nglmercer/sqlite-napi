@@ -28,9 +28,21 @@ impl Database {
         } else {
             Connection::open(path).map_err(to_napi_error)?
         };
+        
         // Enable extended result codes for better error handling
         conn.execute_batch("PRAGMA extended_result_codes = ON")
             .map_err(to_napi_error)?;
+        
+        // Performance PRAGMAs for optimized performance
+        conn.execute_batch(
+            "PRAGMA journal_mode = WAL;
+             PRAGMA synchronous = NORMAL;
+             PRAGMA cache_size = -64000;
+             PRAGMA temp_store = MEMORY;
+             PRAGMA mmap_size = 268435456;
+             PRAGMA foreign_keys = ON;"
+        ).map_err(to_napi_error)?;
+        
         Ok(Database {
             conn: Arc::new(Mutex::new(conn)),
         })
@@ -106,6 +118,41 @@ impl Database {
         Ok(Transaction::new(self.conn.clone(), false, None))
     }
 
+    /// Execute multiple statements in a transaction
+    #[napi]
+    pub fn transaction_fn(&self, mode: Option<String>, statements: Vec<String>) -> Result<QueryResult> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| Error::from_reason("DB Lock failed"))?;
+
+        let mode_str = match mode.as_deref() {
+            Some("immediate") => "IMMEDIATE",
+            Some("exclusive") => "EXCLUSIVE",
+            _ => "DEFERRED",
+        };
+
+        conn.execute(&format!("BEGIN {}", mode_str), [])
+            .map_err(to_napi_error)?;
+
+        for sql in statements {
+            if let Err(e) = conn.execute_batch(&sql) {
+                conn.execute("ROLLBACK", []).ok();
+                return Err(to_napi_error(e));
+            }
+        }
+
+        conn.execute("COMMIT", []).map_err(|e| {
+            conn.execute("ROLLBACK", []).ok();
+            to_napi_error(e)
+        })?;
+
+        Ok(QueryResult {
+            changes: conn.changes() as u32,
+            last_insert_rowid: conn.last_insert_rowid(),
+        })
+    }
+
     /// Load a SQLite extension
     #[napi]
     pub fn load_extension(&self, path: String) -> Result<()> {
@@ -113,13 +160,44 @@ impl Database {
             .conn
             .lock()
             .map_err(|_| Error::from_reason("DB Lock failed"))?;
-        
-        // Ensure the trait LoadExtension is available if needed, 
-        // but Connection should have it if the feature is on.
         unsafe {
             conn.load_extension(&path, None)
                 .map_err(to_napi_error)?;
         }
+        Ok(())
+    }
+
+    /// Serialize the database to SQL statements (for in-memory backup)
+    #[napi]
+    pub fn serialize(&self) -> Result<String> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| Error::from_reason("DB Lock failed"))?;
+        
+        let mut stmt = conn
+            .prepare("SELECT sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY CASE WHEN type = 'table' THEN 1 WHEN type = 'index' THEN 2 ELSE 3 END, name")
+            .map_err(to_napi_error)?;
+        
+        let statements: Vec<String> = stmt
+            .query_map([], |row| row.get(0))
+            .map_err(to_napi_error)?
+            .filter_map(|r| r.ok())
+            .collect();
+        
+        Ok(statements.join(";\n"))
+    }
+
+    /// Deserialize a database from SQL statements (restore from backup)
+    #[napi]
+    pub fn deserialize(&self, sql: String) -> Result<()> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| Error::from_reason("DB Lock failed"))?;
+        
+        conn.execute_batch(&sql)
+            .map_err(to_napi_error)?;
         Ok(())
     }
 

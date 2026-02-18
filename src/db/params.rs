@@ -30,7 +30,10 @@ pub fn js_to_param(val: &Unknown) -> Result<Param> {
     match val.get_type()? {
         ValueType::Undefined | ValueType::Null => Ok(Param::Null),
         ValueType::Boolean => Ok(Param::Bool(val.coerce_to_bool()?)),
-        ValueType::Number => Ok(Param::Float(val.coerce_to_number()?.get_double()?)),
+        ValueType::Number => {
+            let num = val.coerce_to_number()?;
+            Ok(Param::Float(num.get_double()?))
+        }
         ValueType::String => {
             let s = val.coerce_to_string()?.into_utf8()?;
             Ok(Param::Text(s.as_str()?.to_string()))
@@ -44,14 +47,11 @@ pub fn js_to_param(val: &Unknown) -> Result<Param> {
                 let buf = unsafe { val.cast::<Buffer>()? };
                 Ok(Param::Blob(buf.as_ref().to_vec()))
             } else if val.is_date()? {
-                let date = unsafe { val.cast::<Date>()? };
-                // date.value() returns f64 directly in some versions, 
-                // but checking the error it seems it might be returning something else?
-                // Actually, let's try to convert it to number if it's not f64.
-                Ok(Param::Float(date.value()))
+                // Coerces to number to get timestamp
+                let num = val.coerce_to_number()?;
+                Ok(Param::Float(num.get_double()?))
             } else {
-                let env = unsafe { Env::from_raw(val.env()) };
-                // Using env.from_js_value requires serde-json feature
+                let env = Env::from_raw(val.env());
                 let json_value: serde_json::Value = env.from_js_value(*val)?;
                 Ok(Param::Text(json_value.to_string()))
             }

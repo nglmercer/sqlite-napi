@@ -5,7 +5,7 @@ mod error;
 mod models;
 
 pub use db::{Database, Iter, Statement, Transaction};
-pub use models::{QueryResult, TransactionResult};
+pub use models::{Migration, QueryResult, TransactionResult};
 
 #[napi]
 pub fn get_sqlite_version() -> String {

@@ -2,7 +2,7 @@
 
 use crate::db::convert_params;
 use crate::error::to_napi_error;
-use crate::models::QueryResult;
+use crate::models::{Migration, QueryResult};
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 use rusqlite::{serialize::OwnedData, Connection, DatabaseName, OpenFlags, ToSql};
@@ -581,6 +581,280 @@ impl Database {
     #[napi]
     pub fn filename(&self) -> String {
         self.filename.clone()
+    }
+
+    // ========================================
+    // Schema Initialization and Migration
+    // ========================================
+
+    /// Get the current schema version
+    ///
+    /// The schema version is stored in a special table called `_schema_version`.
+    /// This method returns the current version, or 0 if no version has been set.
+    ///
+    /// # Example
+    /// ```javascript
+    /// const version = db.getSchemaVersion();
+    /// console.log(version); // 0 or 1, 2, 3, etc.
+    /// ```
+    #[napi]
+    pub fn get_schema_version(&self) -> Result<u32> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| Error::from_reason("DB Lock failed"))?;
+
+        // Check if the schema_version table exists
+        let table_exists: i32 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = '_schema_version'",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(to_napi_error)?;
+
+        if table_exists == 0 {
+            return Ok(0);
+        }
+
+        let version: std::result::Result<i64, _> = conn.query_row(
+            "SELECT COALESCE(MAX(version), 0) FROM _schema_version",
+            [],
+            |row| row.get(0),
+        );
+
+        match version {
+            Ok(v) => Ok(v as u32),
+            Err(_) => Ok(0),
+        }
+    }
+
+    /// Set the schema version
+    ///
+    /// This method manually sets the schema version in the database.
+    /// Usually, you would use migrate() instead which handles version tracking.
+    ///
+    /// # Arguments
+    /// * `version` - The version number to set
+    ///
+    /// # Example
+    /// ```javascript
+    /// db.setSchemaVersion(1);
+    /// ```
+    #[napi]
+    pub fn set_schema_version(&self, version: u32) -> Result<()> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| Error::from_reason("DB Lock failed"))?;
+
+        // Create the schema_version table if it doesn't exist
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS _schema_version (
+                version INTEGER PRIMARY KEY,
+                applied_at TEXT NOT NULL DEFAULT (datetime('now')),
+                description TEXT
+            )",
+            [],
+        )
+        .map_err(to_napi_error)?;
+
+        // Insert or replace the version
+        conn.execute(
+            "INSERT OR REPLACE INTO _schema_version (version, description, applied_at) VALUES (?, ?, datetime('now'))",
+            [&version.to_string(), "manual"],
+        )
+        .map_err(to_napi_error)?;
+
+        Ok(())
+    }
+
+    /// Initialize the database with a schema
+    ///
+    /// This method executes the provided SQL to initialize the database schema.
+    /// It wraps the initialization in a transaction for atomicity.
+    ///
+    /// # Arguments
+    /// * `schema` - SQL statements to create the initial schema
+    /// * `version` - The initial schema version (default: 1)
+    /// * `description` - Optional description of this schema version
+    ///
+    /// # Returns
+    /// The schema version after initialization
+    ///
+    /// # Example
+    /// ```javascript
+    /// db.initSchema(`
+    ///   CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);
+    ///   CREATE TABLE posts (id INTEGER PRIMARY KEY, title TEXT);
+    /// `, 1, 'Initial schema');
+    /// ```
+    #[napi]
+    pub fn init_schema(
+        &self,
+        schema: String,
+        version: Option<u32>,
+        description: Option<String>,
+    ) -> Result<u32> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| Error::from_reason("DB Lock failed"))?;
+
+        let ver = version.unwrap_or(1);
+
+        // Start transaction
+        conn.execute("BEGIN IMMEDIATE", []).map_err(to_napi_error)?;
+
+        // Execute the schema
+        if let Err(e) = conn.execute_batch(&schema) {
+            conn.execute("ROLLBACK", []).ok();
+            return Err(to_napi_error(e));
+        }
+
+        // Create the schema_version table
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS _schema_version (
+                version INTEGER PRIMARY KEY,
+                applied_at TEXT NOT NULL DEFAULT (datetime('now')),
+                description TEXT
+            )",
+            [],
+        )
+        .map_err(to_napi_error)?;
+
+        // Insert the version record
+        let desc = description.unwrap_or_else(|| "initial".to_string());
+        conn.execute(
+            "INSERT OR REPLACE INTO _schema_version (version, description, applied_at) VALUES (?, ?, datetime('now'))",
+            [&ver.to_string(), &desc],
+        )
+        .map_err(to_napi_error)?;
+
+        // Commit transaction
+        conn.execute("COMMIT", []).map_err(|e| {
+            conn.execute("ROLLBACK", []).ok();
+            to_napi_error(e)
+        })?;
+
+        Ok(ver)
+    }
+
+    /// Migrate the database to a new schema version
+    ///
+    /// This method runs migrations to bring the database schema up to the target version.
+    /// It compares the current schema version with the target version and runs any necessary
+    /// migration scripts in order.
+    ///
+    /// # Arguments
+    /// * `migrations` - Array of migration objects, each containing version and sql
+    /// * `target_version` - The version to migrate to (defaults to the highest migration version)
+    ///
+    /// # Returns
+    /// The new schema version after migration
+    ///
+    /// # Example
+    /// ```javascript
+    /// const migrations = [
+    ///   { version: 1, sql: "CREATE TABLE users (id INTEGER PRIMARY KEY)" },
+    ///   { version: 2, sql: "ALTER TABLE users ADD COLUMN email TEXT" },
+    ///   { version: 3, sql: "CREATE TABLE posts (id INTEGER PRIMARY KEY)" },
+    /// ];
+    ///
+    /// const newVersion = db.migrate(migrations);
+    /// console.log(newVersion); // 3
+    /// ```
+    #[napi]
+    pub fn migrate(&self, migrations: Vec<Migration>, target_version: Option<u32>) -> Result<u32> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| Error::from_reason("DB Lock failed"))?;
+
+        // Get current version
+        let current_version = {
+            let table_exists: i32 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = '_schema_version'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap_or(0);
+
+            if table_exists == 0 {
+                0
+            } else {
+                let version: std::result::Result<i64, _> = conn.query_row(
+                    "SELECT COALESCE(MAX(version), 0) FROM _schema_version",
+                    [],
+                    |row| row.get(0),
+                );
+                version.unwrap_or(0) as u32
+            }
+        };
+
+        // Sort migrations by version
+        let mut sorted_migrations = migrations;
+        sorted_migrations.sort_by(|a, b| a.version.cmp(&b.version));
+
+        // Determine target version
+        let target = target_version
+            .unwrap_or_else(|| sorted_migrations.last().map(|m| m.version).unwrap_or(1));
+
+        // If already at target version, return current
+        if current_version >= target {
+            return Ok(current_version);
+        }
+
+        // Start transaction
+        conn.execute("BEGIN IMMEDIATE", []).map_err(to_napi_error)?;
+
+        // Create schema_version table if needed
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS _schema_version (
+                version INTEGER PRIMARY KEY,
+                applied_at TEXT NOT NULL DEFAULT (datetime('now')),
+                description TEXT
+            )",
+            [],
+        )
+        .map_err(to_napi_error)?;
+
+        // Run migrations
+        let mut new_version = current_version;
+        for migration in sorted_migrations.iter() {
+            if migration.version > current_version && migration.version <= target {
+                // Execute migration SQL
+                if let Err(e) = conn.execute_batch(&migration.sql) {
+                    conn.execute("ROLLBACK", []).ok();
+                    return Err(Error::from_reason(format!(
+                        "Migration {} failed: {}",
+                        migration.version, e
+                    )));
+                }
+
+                // Record the migration
+                let desc = migration
+                    .description
+                    .clone()
+                    .unwrap_or_else(|| format!("migration to v{}", migration.version));
+                conn.execute(
+                    "INSERT OR REPLACE INTO _schema_version (version, description, applied_at) VALUES (?, ?, datetime('now'))",
+                    [&migration.version.to_string(), &desc],
+                )
+                .map_err(to_napi_error)?;
+
+                new_version = migration.version;
+            }
+        }
+
+        // Commit transaction
+        conn.execute("COMMIT", []).map_err(|e| {
+            conn.execute("ROLLBACK", []).ok();
+            to_napi_error(e)
+        })?;
+
+        Ok(new_version)
     }
 
     // ========================================

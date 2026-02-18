@@ -241,6 +241,65 @@ try {
 }
 ```
 
+### Schema Initialization and Migration
+
+#### `database.getSchemaVersion()` → `number`
+
+Get the current schema version. The version is stored in a special `_schema_version` table.
+
+```typescript
+const version = db.getSchemaVersion();
+// 0 (if never initialized) or 1, 2, 3, etc.
+```
+
+#### `database.setSchemaVersion(version)` → `void`
+
+Manually set the schema version. Usually, you would use `migrate()` instead.
+
+```typescript
+db.setSchemaVersion(1);
+```
+
+#### `database.initSchema(sql, version?, description?)` → `number`
+
+Initialize the database with a schema. Executes the provided SQL and sets the schema version atomically.
+
+```typescript
+// Initialize with version 1
+const version = db.initSchema(`
+  CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);
+  CREATE TABLE posts (id INTEGER PRIMARY KEY, user_id INTEGER, title TEXT);
+`, 1, "Initial schema");
+
+console.log(version); // 1
+```
+
+#### `database.migrate(migrations, targetVersion?)` → `number`
+
+Run migrations to bring the database schema up to the target version. Migrations are executed in order and each migration is recorded in the `_schema_version` table.
+
+```typescript
+const migrations = [
+  { version: 1, sql: "CREATE TABLE users (id INTEGER PRIMARY KEY)" },
+  { version: 2, sql: "ALTER TABLE users ADD COLUMN email TEXT" },
+  { version: 3, sql: "CREATE TABLE posts (id INTEGER PRIMARY KEY, user_id INTEGER)" },
+];
+
+// Migrate to latest version
+const newVersion = db.migrate(migrations);
+console.log(newVersion); // 3
+
+// Or migrate to a specific version
+const v2 = db.migrate(migrations, 2);
+console.log(v2); // 2
+```
+
+The migration system:
+- Automatically tracks which migrations have been applied
+- Only runs migrations that haven't been applied yet
+- Runs all migrations in a transaction (rolls back on failure)
+- Records each applied migration with timestamp and description
+
 ### Schema Introspection
 
 #### `database.getTables()` → `Array<string>`

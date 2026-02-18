@@ -102,9 +102,14 @@ jobs:
         with:
           name: bindings-${{ matrix.artifact_suffix }}
           path: |
-            dist/*.node
+            dist/${{ matrix.artifact_suffix }}/*.node
             package.json
           retention-days: 1
+
+      - name: Verify artifact content
+        run: |
+          echo "Checking uploaded files..."
+          ls -la dist/${{ matrix.artifact_suffix }}/
 
   release:
     name: Create Release

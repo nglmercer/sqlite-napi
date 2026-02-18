@@ -108,6 +108,6 @@ jobs:
         with:
           name: bindings-${{ matrix.artifact_suffix }}
           path: |
-            dist/*.node
+            dist/${{ matrix.artifact_suffix }}/*.node
             package.json
           retention-days: 7

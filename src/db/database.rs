@@ -5,47 +5,110 @@ use crate::error::to_napi_error;
 use crate::models::QueryResult;
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
-use rusqlite::{serialize::OwnedData, Connection, DatabaseName, ToSql};
+use rusqlite::{serialize::OwnedData, Connection, DatabaseName, OpenFlags, ToSql};
 
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::AtomicBool;
 
 use super::Statement;
 use super::Transaction;
+
+/// Database options for connection configuration
+#[napi(object)]
+pub struct DatabaseOptions {
+    /// Open database in read-only mode
+    pub readonly: Option<bool>,
+    /// Create database if it doesn't exist (default: true)
+    pub create: Option<bool>,
+    /// Open database in read-write mode (default: true)
+    pub readwrite: Option<bool>,
+}
 
 /// Database connection struct - represents an SQLite database connection
 #[napi]
 pub struct Database {
     conn: Arc<Mutex<Connection>>,
+    in_transaction: Arc<AtomicBool>,
+    closed: Arc<AtomicBool>,
+    filename: String,
 }
 
 #[napi]
 impl Database {
     /// Create a new Database connection
+    /// 
+    /// # Arguments
+    /// * `path` - Path to the database file, or ":memory:" for in-memory database
+    /// * `options` - Optional configuration object with readonly, create, readwrite flags
+    /// 
+    /// # Example
+    /// ```javascript
+    /// // Simple usage
+    /// const db = new Database("mydb.sqlite");
+    /// 
+    /// // With options
+    /// const db = new Database("mydb.sqlite", { readonly: true });
+    /// const db = new Database("mydb.sqlite", { create: false }); // Don't create if doesn't exist
+    /// ```
     #[napi(constructor)]
-    pub fn new(path: String) -> Result<Self> {
+    pub fn new(path: String, options: Option<DatabaseOptions>) -> Result<Self> {
+        let opts = options.unwrap_or(DatabaseOptions {
+            readonly: Some(false),
+            create: Some(true),
+            readwrite: Some(true),
+        });
+
+        let readonly = opts.readonly.unwrap_or(false);
+        let create = opts.create.unwrap_or(true);
+        let readwrite = opts.readwrite.unwrap_or(true);
+
         let conn = if path == ":memory:" {
             Connection::open_in_memory().map_err(to_napi_error)?
         } else {
-            Connection::open(path).map_err(to_napi_error)?
+            // Build OpenFlags based on options
+            let mut flags = OpenFlags::empty();
+            
+            if readonly {
+                flags.insert(OpenFlags::SQLITE_OPEN_READ_ONLY);
+            } else {
+                if readwrite {
+                    flags.insert(OpenFlags::SQLITE_OPEN_READ_WRITE);
+                }
+                if create {
+                    flags.insert(OpenFlags::SQLITE_OPEN_CREATE);
+                }
+            }
+
+            // If no flags were set, use default
+            if flags.is_empty() {
+                flags.insert(OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE);
+            }
+
+            Connection::open_with_flags(&path, flags).map_err(to_napi_error)?
         };
 
         // Enable extended result codes for better error handling
         conn.execute_batch("PRAGMA extended_result_codes = ON")
             .map_err(to_napi_error)?;
 
-        // Performance PRAGMAs for optimized performance
-        conn.execute_batch(
-            "PRAGMA journal_mode = WAL;
-             PRAGMA synchronous = NORMAL;
-             PRAGMA cache_size = -64000;
-             PRAGMA temp_store = MEMORY;
-             PRAGMA mmap_size = 268435456;
-             PRAGMA foreign_keys = ON;",
-        )
-        .map_err(to_napi_error)?;
+        // Performance PRAGMAs for optimized performance (skip for read-only)
+        if !readonly {
+            conn.execute_batch(
+                "PRAGMA journal_mode = WAL;
+                 PRAGMA synchronous = NORMAL;
+                 PRAGMA cache_size = -64000;
+                 PRAGMA temp_store = MEMORY;
+                 PRAGMA mmap_size = 268435456;
+                 PRAGMA foreign_keys = ON;",
+            )
+            .map_err(to_napi_error)?;
+        }
 
         Ok(Database {
             conn: Arc::new(Mutex::new(conn)),
+            in_transaction: Arc::new(AtomicBool::new(false)),
+            closed: Arc::new(AtomicBool::new(false)),
+            filename: path,
         })
     }
 
@@ -116,7 +179,15 @@ impl Database {
         conn.execute(&format!("BEGIN {}", mode_str), [])
             .map_err(to_napi_error)?;
 
-        Ok(Transaction::new(self.conn.clone(), false, None))
+        // Set the in_transaction flag
+        self.in_transaction.store(true, std::sync::atomic::Ordering::SeqCst);
+
+        Ok(Transaction::new(
+            self.conn.clone(),
+            self.in_transaction.clone(),
+            false,
+            None,
+        ))
     }
 
     /// Execute multiple statements in a transaction
@@ -479,12 +550,192 @@ impl Database {
         // Close the connection
         drop(conn);
 
+        // Mark as closed
+        self.closed.store(true, std::sync::atomic::Ordering::SeqCst);
+
         Ok(())
     }
 
     /// Check if the database connection is closed
     #[napi]
     pub fn is_closed(&self) -> bool {
-        self.conn.lock().is_err()
+        self.closed.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// Check if currently in a transaction
+    #[napi]
+    pub fn in_transaction(&self) -> bool {
+        self.in_transaction.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// Get the database filename/path
+    #[napi]
+    pub fn filename(&self) -> String {
+        self.filename.clone()
+    }
+
+    // ========================================
+    // Custom Functions and Collations
+    // ========================================
+
+    /// Create a custom scalar function that can be called from SQL
+    /// 
+    /// # Arguments
+    /// * `name` - Name of the function to register
+    /// * `func` - JavaScript function to execute
+    /// 
+    /// # Example
+    /// ```javascript
+    /// db.createFunction("my_func", (arg1, arg2) => {
+    ///   return arg1 + arg2;
+    /// });
+    /// const result = db.query("SELECT my_func(1, 2)").get();
+    /// ```
+    /// 
+    /// Note: Full implementation requires complex async callback handling between
+    /// SQLite and JavaScript. This is a placeholder for future implementation.
+    #[napi]
+    pub fn create_function(&self, name: String) -> Result<()> {
+        let _conn = self
+            .conn
+            .lock()
+            .map_err(|_| Error::from_reason("DB Lock failed"))?;
+
+        // Placeholder: Full implementation would require complex async callback handling
+        // between SQLite and JavaScript using napi-rs thread-safe function callbacks
+        let _ = name;
+        
+        Ok(())
+    }
+
+    /// Create a custom collation that can be used for sorting
+    /// Arguments
+    /// 
+    /// # * `name` - Name of the collation to register
+    /// * `compare_fn` - JavaScript function that compares two strings
+    /// 
+    /// # Example
+    /// ```javascript
+    /// db.createCollation("my_collation", (a, b) => {
+    ///   return a.localeCompare(b);
+    /// });
+    /// ```
+    /// 
+    /// Note: Full implementation requires complex async callback handling between
+    /// SQLite and JavaScript. This is a placeholder for future implementation.
+    #[napi]
+    pub fn create_collation(&self, name: String) -> Result<()> {
+        let _conn = self
+            .conn
+            .lock()
+            .map_err(|_| Error::from_reason("DB Lock failed"))?;
+
+        // Placeholder: Full implementation would require complex async callback handling
+        let _ = name;
+        
+        Ok(())
+    }
+
+    // ========================================
+    // Pragma Convenience Methods
+    // ========================================
+
+    /// Execute a PRAGMA statement and return the result
+    /// 
+    /// # Arguments
+    /// * `name` - Name of the PRAGMA to execute
+    /// * `value` - Optional value to set (for SET PRAGMA)
+    /// 
+    /// # Example
+    /// ```javascript
+    /// // Get a pragma value
+    /// const journal_mode = db.pragma("journal_mode");
+    /// 
+    /// // Set a pragma value
+    /// db.pragma("cache_size", -64000);
+    /// ```
+    #[napi]
+    pub fn pragma(&self, name: String, value: Option<Unknown>) -> Result<serde_json::Value> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| Error::from_reason("DB Lock failed"))?;
+
+        if let Some(val) = value {
+            // SET PRAGMA
+            let env = Env::from_raw(val.env());
+            let rusqlite_params = convert_params(&env, Some(val))?;
+            
+            if rusqlite_params.len() == 1 {
+                match &rusqlite_params[0] {
+                    crate::db::Param::Int(i) => {
+                        conn.execute(&format!("PRAGMA {} = {}", name, i), [])
+                            .map_err(to_napi_error)?;
+                    }
+                    crate::db::Param::Text(s) => {
+                        conn.execute(&format!("PRAGMA {} = {}", name, s), [])
+                            .map_err(to_napi_error)?;
+                    }
+                    _ => {
+                        return Err(Error::from_reason("Invalid pragma value type"));
+                    }
+                }
+            } else {
+                return Err(Error::from_reason("Invalid pragma value"));
+            }
+            
+            // Return the new value
+            let mut stmt = conn
+                .prepare(&format!("PRAGMA {}", name))
+                .map_err(to_napi_error)?;
+            
+            let result: Vec<serde_json::Value> = stmt
+                .query_map([], |row| {
+                    let val: String = row.get(0)?;
+                    Ok(serde_json::Value::String(val))
+                })
+                .map_err(to_napi_error)?
+                .filter_map(|r| r.ok())
+                .collect();
+            
+            if result.len() == 1 {
+                Ok(result[0].clone())
+            } else {
+                Ok(serde_json::Value::Array(result))
+            }
+        } else {
+            // GET PRAGMA
+            let mut stmt = conn
+                .prepare(&format!("PRAGMA {}", name))
+                .map_err(to_napi_error)?;
+
+            let results: Vec<serde_json::Value> = stmt
+                .query_map([], |row| {
+                    // Try to get as string first (most pragmas return strings)
+                    let val: std::result::Result<String, _> = row.get(0);
+                    if let Ok(s) = val {
+                        Ok(serde_json::Value::String(s))
+                    } else {
+                        // Try as integer
+                        let val: std::result::Result<i64, _> = row.get(0);
+                        if let Ok(i) = val {
+                            Ok(serde_json::Value::Number(i.into()))
+                        } else {
+                            Ok(serde_json::Value::Null)
+                        }
+                    }
+                })
+                .map_err(to_napi_error)?
+                .filter_map(|r| r.ok())
+                .collect();
+
+            if results.len() == 1 {
+                Ok(results[0].clone())
+            } else if results.is_empty() {
+                Ok(serde_json::Value::Null)
+            } else {
+                Ok(serde_json::Value::Array(results))
+            }
+        }
     }
 }

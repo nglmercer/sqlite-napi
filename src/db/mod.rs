@@ -7,7 +7,7 @@ mod statement;
 mod transaction;
 
 pub use database::Database;
-pub use params::{convert_params, Param};
+pub use params::{convert_params, convert_params_container, Param, ParamsContainer};
 pub use row::sqlite_to_json;
-pub use statement::{Iter, Statement};
+pub use statement::{ColumnInfo, Iter, Statement};
 pub use transaction::Transaction;

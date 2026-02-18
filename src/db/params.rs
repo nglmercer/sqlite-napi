@@ -3,6 +3,7 @@
 use napi::bindgen_prelude::*;
 use rusqlite::types::{ToSqlOutput, ValueRef};
 use rusqlite::ToSql;
+use std::collections::HashMap;
 
 pub enum Param {
     Null,
@@ -65,6 +66,75 @@ pub fn js_to_param(val: &Unknown) -> Result<Param> {
     }
 }
 
+/// Convert a serde_json::Value to Param
+fn json_value_to_param(value: &serde_json::Value) -> Result<Param> {
+    match value {
+        serde_json::Value::Null => Ok(Param::Null),
+        serde_json::Value::Bool(b) => Ok(Param::Bool(*b)),
+        serde_json::Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                Ok(Param::Int(i))
+            } else if let Some(f) = n.as_f64() {
+                Ok(Param::Float(f))
+            } else {
+                Ok(Param::Float(n.as_f64().unwrap_or(0.0)))
+            }
+        }
+        serde_json::Value::String(s) => Ok(Param::Text(s.clone())),
+        serde_json::Value::Array(_) | serde_json::Value::Object(_) => {
+            Ok(Param::Text(value.to_string()))
+        }
+    }
+}
+
+/// Parameter container that supports both positional and named parameters
+pub enum ParamsContainer {
+    Positional(Vec<Param>),
+    Named(HashMap<String, Param>),
+}
+
+/// Convert JavaScript parameters to a ParamsContainer
+/// Handles arrays (positional) and objects (named parameters)
+pub fn convert_params_container(_env: &Env, params: Option<Unknown>) -> Result<ParamsContainer> {
+    if let Some(p) = params {
+        if p.is_array()? {
+            // Positional parameters: [value1, value2, ...]
+            let arr = unsafe { p.cast::<Array>()? };
+            let mut result = Vec::new();
+            for i in 0..arr.len() {
+                result.push(js_to_param(&arr.get_element(i)?)?);
+            }
+            Ok(ParamsContainer::Positional(result))
+        } else if p.get_type()? == ValueType::Object {
+            // Named parameters: { $name: value, :name: value, @name: value }
+            let env = Env::from_raw(p.env());
+            let json_value: serde_json::Value = env.from_js_value(p)?;
+
+            if let serde_json::Value::Object(map) = json_value {
+                let mut result = HashMap::new();
+                for (key, value) in map.iter() {
+                    // Normalize the parameter name - SQLite accepts $name, :name, @name
+                    // We need to ensure the key matches what SQLite expects
+                    let normalized_key = if key.starts_with('$') || key.starts_with(':') || key.starts_with('@') {
+                        key.to_string()
+                    } else {
+                        // If no prefix, add $ prefix (bun:sqlite style)
+                        format!("${}", key)
+                    };
+                    result.insert(normalized_key, json_value_to_param(value)?);
+                }
+                Ok(ParamsContainer::Named(result))
+            } else {
+                Ok(ParamsContainer::Positional(vec![js_to_param(&p)?]))
+            }
+        } else {
+            Ok(ParamsContainer::Positional(vec![js_to_param(&p)?]))
+        }
+    } else {
+        Ok(ParamsContainer::Positional(Vec::new()))
+    }
+}
+
 /// Convert JavaScript parameters to rusqlite parameters
 /// Handles arrays (positional) and objects (named parameters)
 #[allow(unused_variables)]
@@ -97,25 +167,4 @@ pub fn convert_params(env: &Env, params: Option<Unknown>) -> Result<Vec<Param>> 
         }
     }
     Ok(result)
-}
-
-/// Convert a serde_json::Value to Param
-fn json_value_to_param(value: &serde_json::Value) -> Result<Param> {
-    match value {
-        serde_json::Value::Null => Ok(Param::Null),
-        serde_json::Value::Bool(b) => Ok(Param::Bool(*b)),
-        serde_json::Value::Number(n) => {
-            if let Some(i) = n.as_i64() {
-                Ok(Param::Int(i))
-            } else if let Some(f) = n.as_f64() {
-                Ok(Param::Float(f))
-            } else {
-                Ok(Param::Float(n.as_f64().unwrap_or(0.0)))
-            }
-        }
-        serde_json::Value::String(s) => Ok(Param::Text(s.clone())),
-        serde_json::Value::Array(_) | serde_json::Value::Object(_) => {
-            Ok(Param::Text(value.to_string()))
-        }
-    }
 }

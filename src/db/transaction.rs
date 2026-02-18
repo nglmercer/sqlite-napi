@@ -7,11 +7,13 @@ use napi::bindgen_prelude::*;
 use napi_derive::napi;
 use rusqlite::{Connection, ToSql};
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::AtomicBool;
 
 /// Transaction struct - represents an SQLite transaction
 #[napi]
 pub struct Transaction {
     conn: Arc<Mutex<Connection>>,
+    in_transaction: Arc<AtomicBool>,
     #[allow(dead_code)]
     committed: bool,
     savepoint_name: Option<String>,
@@ -21,11 +23,13 @@ impl Transaction {
     /// Create a new Transaction (internal use)
     pub(crate) fn new(
         conn: Arc<Mutex<Connection>>,
+        in_transaction: Arc<AtomicBool>,
         committed: bool,
         savepoint_name: Option<String>,
     ) -> Self {
         Transaction {
             conn,
+            in_transaction,
             committed,
             savepoint_name,
         }
@@ -79,6 +83,8 @@ impl Transaction {
                 .map_err(to_napi_error)?;
         } else {
             conn.execute("COMMIT", []).map_err(to_napi_error)?;
+            // Only reset the transaction flag when committing a real transaction (not savepoint)
+            self.in_transaction.store(false, std::sync::atomic::Ordering::SeqCst);
         }
 
         Ok(TransactionResult {
@@ -107,6 +113,8 @@ impl Transaction {
                 .map_err(to_napi_error)?;
         } else {
             conn.execute("ROLLBACK", []).map_err(to_napi_error)?;
+            // Only reset the transaction flag when rolling back a real transaction (not savepoint)
+            self.in_transaction.store(false, std::sync::atomic::Ordering::SeqCst);
         }
 
         Ok(TransactionResult {
@@ -132,6 +140,11 @@ impl Transaction {
         conn.execute(&format!("SAVEPOINT {}", name), [])
             .map_err(to_napi_error)?;
 
-        Ok(Transaction::new(self.conn.clone(), false, Some(name)))
+        Ok(Transaction::new(
+            self.conn.clone(),
+            self.in_transaction.clone(),
+            false,
+            Some(name),
+        ))
     }
 }

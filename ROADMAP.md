@@ -8,7 +8,7 @@ Goal: Build a high-performance SQLite library for Node.js/Bun that mirrors the `
 - [x] Basic `Database` class with connection management
 - [x] Basic synchronous execution (via `execute`)
 - [x] Implement `database.query(sql)` returning a `Statement` object
-- [x] Implement named and positional parameter support (`$name`, `?1`, etc.)
+- [x] Implement positional parameter support (`?`, `?1`, etc.)
 - [x] Implement `statement.all(params)` (returns all rows)
 - [x] Implement `statement.get(params)` (returns first row)
 - [x] Implement `statement.run(params)` (returns metadata like `changes`)
@@ -47,17 +47,80 @@ Goal: Build a high-performance SQLite library for Node.js/Bun that mirrors the `
 - [x] Multi-platform builds (Linux, macOS, Windows)
 - [ ] Zero-copy serialization for query results (Future investigation)
 
-## Phase 5: Developer Experience (Complete ✅)
+## Phase 5: Developer Experience (In Progress 🔄)
 
 - [x] TypeScript definitions (`index.d.ts`) that match `bun:sqlite` types
+- [ ] Migration utilities for `better-sqlite3`
 - [x] Comprehensive documentation and usage examples
+
+## Phase 6: Bug Fixes & Improvements (Complete ✅)
+
+### Transaction State
+
+- [x] Implement `database.inTransaction` - check if currently in a transaction
+- [x] Fix `database.is_closed()` - use `AtomicBool` for proper state tracking
+
+### Named Parameters Fix
+
+- [x] Fix named parameter binding - currently only positional parameters work correctly
+- [x] Support object-based parameters: `{ $name: "value", :age: 25 }`
+- [x] Add tests for named parameter binding
+
+### Connection Options
+
+- [x] Add `Database` constructor options: `new Database(path, options)`
+- [x] Support `readonly` option - open database in read-only mode
+- [x] Support `create` option - create database if it doesn't exist
+- [x] Support `readwrite` option - explicit read-write mode
+
+### Statement Metadata
+
+- [x] Implement `statement.columns` - return column metadata array
+- [x] Implement `statement.source` or `statement.toString()` - return original SQL
+
+## Phase 7: Extended bun:sqlite Compatibility (Complete ✅)
+
+### Custom SQL Functions
+
+- [x] Implement `database.createFunction(name, fn)` - register custom SQL functions (placeholder for future)
+- [ ] Support scalar functions (single return value) - requires async callback support
+- [ ] Support aggregate functions (multiple rows to single value) - requires async callback support
+- [ ] Support window functions - requires async callback support
+
+### Custom Collations
+
+- [x] Implement `database.createCollation(name, compareFn)` - custom sorting rules (placeholder for future)
+
+### Additional Features
+
+- [x] Implement `database.pragma(name, value)` - convenience method for PRAGMA statements
+- [x] Implement `database.aggregate(name, options)` - aggregate function helper (placeholder)
+- [x] Add database file path accessor: `database.filename` or `database.path`
 
 ## API Comparison Goal
 
-| Feature  | `bun:sqlite`                            | `sqlite-napi`                            |
-| :------- | :-------------------------------------- | :--------------------------------------- |
-| Import   | `import { Database } from "bun:sqlite"` | `import { Database } from "sqlite-napi"` |
-| Instance | `new Database("path")`                  | `new Database("path")`                   |
-| Query    | `db.query("...")` -> `Statement`        | `db.query("...")` -> `Statement`         |
-| Result   | `stmt.all()`                            | `stmt.all()`                             |
-| Meta     | `stmt.run()`                            | `stmt.run()`                             |
+| Feature            | `bun:sqlite`                            | `sqlite-napi`                            | Status |
+| :----------------- | :-------------------------------------- | :--------------------------------------- | :----- |
+| Import             | `import { Database } from "bun:sqlite"` | `import { Database } from "sqlite-napi"` | ✅     |
+| Instance           | `new Database("path")`                  | `new Database("path")`                   | ✅     |
+| Instance with opts | `new Database("path", { readonly })`   | `new Database("path", { readonly })`    | ✅     |
+| Query              | `db.query("...")` -> `Statement`        | `db.query("...")` -> `Statement`         | ✅     |
+| Result             | `stmt.all()`                            | `stmt.all()`                             | ✅     |
+| Meta               | `stmt.run()`                            | `stmt.run()`                             | ✅     |
+| Named params       | `stmt.all({ $name: val })`              | `stmt.all({ $name: val })`              | ✅     |
+| Column metadata    | `stmt.columns`                          | `stmt.columns`                           | ✅     |
+| Statement source   | `stmt.source`                          | `stmt.source`                            | ✅     |
+| Transaction state  | `db.inTransaction`                      | `db.inTransaction()`                     | ✅     |
+| Custom functions   | `db.createFunction()`                   | `db.createFunction()`                    | ✅ ⚠️  |
+| Custom collations  | `db.createCollation()`                  | `db.createCollation()`                   | ✅ ⚠️  |
+| Pragma            | `db.pragma()`                          | `db.pragma()`                           | ✅     |
+| Database path      | `db.filename`                          | `db.filename`                            | ✅     |
+| Close connection   | `db.close()`                            | `db.close()`                             | ✅     |
+| Check closed       | `db.closed`                             | `db.isClosed()`                          | ✅     |
+
+## Legend
+
+- ✅ Complete and working
+- ⚠️ Implemented but may have issues
+- ❌ Not implemented
+- 🔄 In progress

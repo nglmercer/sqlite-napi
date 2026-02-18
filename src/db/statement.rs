@@ -6,8 +6,18 @@ use crate::error::to_napi_error;
 use crate::models::QueryResult;
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
-use rusqlite::{params_from_iter, Connection, ToSql};
+use rusqlite::{Connection, ToSql};
 use std::sync::{Arc, Mutex};
+
+/// Column metadata for a prepared statement
+#[napi(object)]
+pub struct ColumnInfo {
+    /// Column name
+    pub name: String,
+    /// Column type (may be empty if not specified)
+    #[napi(js_name = "type")]
+    pub type_: String,
+}
 
 /// Statement struct - represents a prepared SQL statement
 #[napi]
@@ -52,16 +62,19 @@ impl Statement {
             .conn
             .lock()
             .map_err(|_| Error::from_reason("DB Lock failed"))?;
-        let mut stmt = conn.prepare_cached(&self.sql).map_err(to_napi_error)?;
+        
+        // Use prepare instead of prepare_cached to allow named parameter binding
+        let mut stmt = conn.prepare(&self.sql).map_err(to_napi_error)?;
 
         let column_names: Vec<String> = stmt.column_names().iter().map(|s| s.to_string()).collect();
         let column_count = stmt.column_count();
+
         let rusqlite_params = convert_params(&env, params)?;
         let params_refs: Vec<&dyn ToSql> =
             rusqlite_params.iter().map(|p| p as &dyn ToSql).collect();
 
         let mut rows = stmt
-            .query(params_from_iter(params_refs))
+            .query(params_refs.as_slice())
             .map_err(to_napi_error)?;
 
         let mut results = Vec::new();
@@ -89,16 +102,18 @@ impl Statement {
             .conn
             .lock()
             .map_err(|_| Error::from_reason("DB Lock failed"))?;
-        let mut stmt = conn.prepare_cached(&self.sql).map_err(to_napi_error)?;
+        
+        let mut stmt = conn.prepare(&self.sql).map_err(to_napi_error)?;
 
         let column_names: Vec<String> = stmt.column_names().iter().map(|s| s.to_string()).collect();
         let column_count = stmt.column_count();
+
         let rusqlite_params = convert_params(&env, params)?;
         let params_refs: Vec<&dyn ToSql> =
             rusqlite_params.iter().map(|p| p as &dyn ToSql).collect();
 
         let mut rows = stmt
-            .query(params_from_iter(params_refs))
+            .query(params_refs.as_slice())
             .map_err(to_napi_error)?;
 
         if let Some(row) = rows.next().map_err(to_napi_error)? {
@@ -124,14 +139,15 @@ impl Statement {
             .conn
             .lock()
             .map_err(|_| Error::from_reason("DB Lock failed"))?;
-        let mut stmt = conn.prepare_cached(&self.sql).map_err(to_napi_error)?;
+        
+        let mut stmt = conn.prepare(&self.sql).map_err(to_napi_error)?;
 
         let rusqlite_params = convert_params(&env, params)?;
         let params_refs: Vec<&dyn ToSql> =
             rusqlite_params.iter().map(|p| p as &dyn ToSql).collect();
 
         let changes = stmt
-            .execute(params_from_iter(params_refs))
+            .execute(params_refs.as_slice())
             .map_err(to_napi_error)?;
 
         Ok(QueryResult {
@@ -147,15 +163,17 @@ impl Statement {
             .conn
             .lock()
             .map_err(|_| Error::from_reason("DB Lock failed"))?;
-        let mut stmt = conn.prepare_cached(&self.sql).map_err(to_napi_error)?;
+        
+        let mut stmt = conn.prepare(&self.sql).map_err(to_napi_error)?;
 
         let column_count = stmt.column_count();
+
         let rusqlite_params = convert_params(&env, params)?;
         let params_refs: Vec<&dyn ToSql> =
             rusqlite_params.iter().map(|p| p as &dyn ToSql).collect();
 
         let mut rows = stmt
-            .query(params_from_iter(params_refs))
+            .query(params_refs.as_slice())
             .map_err(to_napi_error)?;
 
         let mut results = Vec::new();
@@ -187,7 +205,7 @@ impl Statement {
             .lock()
             .map_err(|_| Error::from_reason("DB Lock failed"))?;
 
-        let mut stmt = conn.prepare_cached(&self.sql).map_err(to_napi_error)?;
+        let mut stmt = conn.prepare(&self.sql).map_err(to_napi_error)?;
 
         let column_names: Vec<String> = stmt.column_names().iter().map(|s| s.to_string()).collect();
         let column_count = stmt.column_count();
@@ -197,7 +215,7 @@ impl Statement {
             rusqlite_params.iter().map(|p| p as &dyn ToSql).collect();
 
         let mut rows_iter = stmt
-            .query(params_from_iter(params_refs))
+            .query(params_refs.as_slice())
             .map_err(to_napi_error)?;
 
         // Pre-fetch all rows since we need to release the connection lock
@@ -216,6 +234,44 @@ impl Statement {
         }
 
         Ok(Iter::new(rows, column_names))
+    }
+
+    /// Get column metadata for this statement
+    /// Returns an array of column information objects
+    #[napi]
+    pub fn columns(&self) -> Result<Vec<ColumnInfo>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| Error::from_reason("DB Lock failed"))?;
+        let stmt = conn.prepare(&self.sql).map_err(to_napi_error)?;
+
+        let column_names: Vec<String> = stmt.column_names().iter().map(|s| s.to_string()).collect();
+        
+        // Get column declarations (if available)
+        // Note: rusqlite doesn't provide full column metadata without executing
+        // a query, so we return the column names with empty types
+        let columns: Vec<ColumnInfo> = column_names
+            .into_iter()
+            .map(|name| ColumnInfo {
+                name,
+                type_: String::new(),
+            })
+            .collect();
+
+        Ok(columns)
+    }
+
+    /// Get the original SQL string for this statement
+    #[napi]
+    pub fn source(&self) -> String {
+        self.sql.clone()
+    }
+
+    /// Get the original SQL string for this statement (alias for source)
+    #[napi(js_name = "toString")]
+    pub fn to_string_method(&self) -> String {
+        self.sql.clone()
     }
 }
 

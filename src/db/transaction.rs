@@ -6,8 +6,8 @@ use crate::models::{QueryResult, TransactionResult};
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 use rusqlite::{Connection, ToSql};
-use std::sync::{Arc, Mutex};
 use std::sync::atomic::AtomicBool;
+use std::sync::{Arc, Mutex};
 
 /// Transaction struct - represents an SQLite transaction
 #[napi]
@@ -84,7 +84,8 @@ impl Transaction {
         } else {
             conn.execute("COMMIT", []).map_err(to_napi_error)?;
             // Only reset the transaction flag when committing a real transaction (not savepoint)
-            self.in_transaction.store(false, std::sync::atomic::Ordering::SeqCst);
+            self.in_transaction
+                .store(false, std::sync::atomic::Ordering::SeqCst);
         }
 
         Ok(TransactionResult {
@@ -114,7 +115,8 @@ impl Transaction {
         } else {
             conn.execute("ROLLBACK", []).map_err(to_napi_error)?;
             // Only reset the transaction flag when rolling back a real transaction (not savepoint)
-            self.in_transaction.store(false, std::sync::atomic::Ordering::SeqCst);
+            self.in_transaction
+                .store(false, std::sync::atomic::Ordering::SeqCst);
         }
 
         Ok(TransactionResult {

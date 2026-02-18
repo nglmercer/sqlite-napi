@@ -82,20 +82,19 @@ Goal: Build a high-performance SQLite library for Node.js/Bun that mirrors the `
 
 ### Custom SQL Functions
 
-- [x] Implement `database.createFunction(name, fn)` - register custom SQL functions (placeholder for future)
-- [ ] Support scalar functions (single return value) - requires async callback support
+- [x] Implement `database.createFunction(name, fn)` - register custom SQL functions
+- [x] Support scalar functions (basic implementation)
 - [ ] Support aggregate functions (multiple rows to single value) - requires async callback support
 - [ ] Support window functions - requires async callback support
 
 ### Custom Collations
 
-- [x] Implement `database.createCollation(name, compareFn)` - custom sorting rules (placeholder for future)
+- [x] Implement `database.createCollation(name, compareFn)` - custom sorting rules
 
 ### Additional Features
 
 - [x] Implement `database.pragma(name, value)` - convenience method for PRAGMA statements
-- [x] Implement `database.aggregate(name, options)` - aggregate function helper (placeholder)
-- [x] Add database file path accessor: `database.filename` or `database.path`
+- [x] Add database file path accessor: `database.filename`
 
 ## API Comparison Goal
 

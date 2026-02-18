@@ -62,7 +62,7 @@ impl Statement {
             .conn
             .lock()
             .map_err(|_| Error::from_reason("DB Lock failed"))?;
-        
+
         // Use prepare instead of prepare_cached to allow named parameter binding
         let mut stmt = conn.prepare(&self.sql).map_err(to_napi_error)?;
 
@@ -73,9 +73,7 @@ impl Statement {
         let params_refs: Vec<&dyn ToSql> =
             rusqlite_params.iter().map(|p| p as &dyn ToSql).collect();
 
-        let mut rows = stmt
-            .query(params_refs.as_slice())
-            .map_err(to_napi_error)?;
+        let mut rows = stmt.query(params_refs.as_slice()).map_err(to_napi_error)?;
 
         let mut results = Vec::new();
 
@@ -102,7 +100,7 @@ impl Statement {
             .conn
             .lock()
             .map_err(|_| Error::from_reason("DB Lock failed"))?;
-        
+
         let mut stmt = conn.prepare(&self.sql).map_err(to_napi_error)?;
 
         let column_names: Vec<String> = stmt.column_names().iter().map(|s| s.to_string()).collect();
@@ -112,9 +110,7 @@ impl Statement {
         let params_refs: Vec<&dyn ToSql> =
             rusqlite_params.iter().map(|p| p as &dyn ToSql).collect();
 
-        let mut rows = stmt
-            .query(params_refs.as_slice())
-            .map_err(to_napi_error)?;
+        let mut rows = stmt.query(params_refs.as_slice()).map_err(to_napi_error)?;
 
         if let Some(row) = rows.next().map_err(to_napi_error)? {
             let mut map = serde_json::Map::new();
@@ -139,7 +135,7 @@ impl Statement {
             .conn
             .lock()
             .map_err(|_| Error::from_reason("DB Lock failed"))?;
-        
+
         let mut stmt = conn.prepare(&self.sql).map_err(to_napi_error)?;
 
         let rusqlite_params = convert_params(&env, params)?;
@@ -163,7 +159,7 @@ impl Statement {
             .conn
             .lock()
             .map_err(|_| Error::from_reason("DB Lock failed"))?;
-        
+
         let mut stmt = conn.prepare(&self.sql).map_err(to_napi_error)?;
 
         let column_count = stmt.column_count();
@@ -172,9 +168,7 @@ impl Statement {
         let params_refs: Vec<&dyn ToSql> =
             rusqlite_params.iter().map(|p| p as &dyn ToSql).collect();
 
-        let mut rows = stmt
-            .query(params_refs.as_slice())
-            .map_err(to_napi_error)?;
+        let mut rows = stmt.query(params_refs.as_slice()).map_err(to_napi_error)?;
 
         let mut results = Vec::new();
 
@@ -214,9 +208,7 @@ impl Statement {
         let params_refs: Vec<&dyn ToSql> =
             rusqlite_params.iter().map(|p| p as &dyn ToSql).collect();
 
-        let mut rows_iter = stmt
-            .query(params_refs.as_slice())
-            .map_err(to_napi_error)?;
+        let mut rows_iter = stmt.query(params_refs.as_slice()).map_err(to_napi_error)?;
 
         // Pre-fetch all rows since we need to release the connection lock
         let mut rows = Vec::new();
@@ -247,7 +239,7 @@ impl Statement {
         let stmt = conn.prepare(&self.sql).map_err(to_napi_error)?;
 
         let column_names: Vec<String> = stmt.column_names().iter().map(|s| s.to_string()).collect();
-        
+
         // Get column declarations (if available)
         // Note: rusqlite doesn't provide full column metadata without executing
         // a query, so we return the column names with empty types

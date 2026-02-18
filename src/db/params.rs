@@ -115,12 +115,13 @@ pub fn convert_params_container(_env: &Env, params: Option<Unknown>) -> Result<P
                 for (key, value) in map.iter() {
                     // Normalize the parameter name - SQLite accepts $name, :name, @name
                     // We need to ensure the key matches what SQLite expects
-                    let normalized_key = if key.starts_with('$') || key.starts_with(':') || key.starts_with('@') {
-                        key.to_string()
-                    } else {
-                        // If no prefix, add $ prefix (bun:sqlite style)
-                        format!("${}", key)
-                    };
+                    let normalized_key =
+                        if key.starts_with('$') || key.starts_with(':') || key.starts_with('@') {
+                            key.to_string()
+                        } else {
+                            // If no prefix, add $ prefix (bun:sqlite style)
+                            format!("${}", key)
+                        };
                     result.insert(normalized_key, json_value_to_param(value)?);
                 }
                 Ok(ParamsContainer::Named(result))

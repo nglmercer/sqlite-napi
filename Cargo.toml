@@ -1,11 +1,11 @@
 [package]
-name = "napi_template"
+name = "sqlite-napi"
 version = "1.0.0"
 edition = "2021"
 
 [lib]
 crate-type = ["cdylib"]
-name = "napi_template"
+name = "sqlite_napi"
 
 [package.metadata.napi]
 targets = [

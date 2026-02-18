@@ -1,10 +1,11 @@
 //! Transaction module - provides the Transaction struct for SQLite transactions
 
+use crate::db::convert_params;
 use crate::error::to_napi_error;
-use crate::models::TransactionResult;
+use crate::models::{QueryResult, TransactionResult};
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
-use rusqlite::Connection;
+use rusqlite::{Connection, ToSql};
 use std::sync::{Arc, Mutex};
 
 /// Transaction struct - represents an SQLite transaction
@@ -33,6 +34,34 @@ impl Transaction {
 
 #[napi]
 impl Transaction {
+    /// Execute a SQL statement within the transaction
+    ///
+    /// # Arguments
+    /// * `sql` - SQL statement to execute
+    /// * `params` - Optional parameters for the statement
+    ///
+    /// # Returns
+    /// QueryResult with changes and last_insert_rowid
+    #[napi]
+    pub fn run(&self, env: Env, sql: String, params: Option<Unknown>) -> Result<QueryResult> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| Error::from_reason("DB Lock failed"))?;
+
+        let rusqlite_params = convert_params(&env, params)?;
+        let params_refs: Vec<&dyn ToSql> =
+            rusqlite_params.iter().map(|p| p as &dyn ToSql).collect();
+
+        conn.execute(&sql, params_refs.as_slice())
+            .map_err(to_napi_error)?;
+
+        Ok(QueryResult {
+            changes: conn.changes() as u32,
+            last_insert_rowid: conn.last_insert_rowid(),
+        })
+    }
+
     /// Commit the transaction
     ///
     /// # Returns

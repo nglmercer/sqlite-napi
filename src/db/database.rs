@@ -1,7 +1,7 @@
 //! Database module - provides the Database struct for SQLite connections
 
 use crate::db::convert_params_container;
-use crate::error::to_napi_error;
+use crate::error::{to_napi_error, to_napi_error_with_context};
 use crate::models::{Migration, QueryResult};
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
@@ -117,7 +117,8 @@ impl Database {
         let readwrite = opts.readwrite.unwrap_or(true);
 
         let conn = if path == ":memory:" {
-            Connection::open_in_memory().map_err(to_napi_error)?
+            Connection::open_in_memory()
+                .map_err(|e| to_napi_error_with_context(e, "Opening in-memory database"))?
         } else {
             let mut flags = OpenFlags::empty();
 
@@ -136,11 +137,12 @@ impl Database {
                 flags.insert(OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE);
             }
 
-            Connection::open_with_flags(&path, flags).map_err(to_napi_error)?
+            Connection::open_with_flags(&path, flags)
+                .map_err(|e| to_napi_error_with_context(e, &format!("Opening database: {}", path)))?
         };
 
         conn.execute_batch("PRAGMA extended_result_codes = ON")
-            .map_err(to_napi_error)?;
+            .map_err(|e| to_napi_error_with_context(e, "Enabling extended result codes"))?;
 
         if !readonly {
             conn.execute_batch(
@@ -151,7 +153,7 @@ impl Database {
                  PRAGMA mmap_size = 268435456;
                  PRAGMA foreign_keys = ON;",
             )
-            .map_err(to_napi_error)?;
+            .map_err(|e| to_napi_error_with_context(e, "Initializing database settings"))?;
         }
 
         Ok(Database {
@@ -187,7 +189,7 @@ impl Database {
                 let params_refs: Vec<&dyn ToSql> =
                     positional_params.iter().map(|p| p as &dyn ToSql).collect();
                 conn.execute(&sql, params_refs.as_slice())
-                    .map_err(to_napi_error)?;
+                    .map_err(|e| to_napi_error_with_context(e, &sql))?;
             }
             crate::db::ParamsContainer::Named(named_params) => {
                 let mut named_params_refs: Vec<(&str, &dyn ToSql)> = Vec::new();
@@ -195,7 +197,7 @@ impl Database {
                     named_params_refs.push((key.as_str(), param as &dyn ToSql));
                 }
                 conn.execute(&sql, named_params_refs.as_slice())
-                    .map_err(to_napi_error)?;
+                    .map_err(|e| to_napi_error_with_context(e, &sql))?;
             }
         }
 
@@ -212,7 +214,8 @@ impl Database {
             .conn
             .lock()
             .map_err(|_| Error::from_reason("DB Lock failed"))?;
-        conn.execute_batch(&sql).map_err(to_napi_error)?;
+        conn.execute_batch(&sql)
+            .map_err(|e| to_napi_error_with_context(e, &sql))?;
         Ok(QueryResult {
             changes: conn.changes() as u32,
             last_insert_rowid: conn.last_insert_rowid(),
@@ -231,8 +234,9 @@ impl Database {
             Some("exclusive") => "EXCLUSIVE",
             _ => "DEFERRED",
         };
-        conn.execute(&format!("BEGIN {}", mode_str), [])
-            .map_err(to_napi_error)?;
+        let sql = format!("BEGIN {}", mode_str);
+        conn.execute(&sql, [])
+            .map_err(|e| to_napi_error_with_context(e, &sql))?;
         self.in_transaction
             .store(true, std::sync::atomic::Ordering::SeqCst);
         Ok(Transaction::new(
@@ -264,7 +268,7 @@ impl Database {
         for sql in statements {
             if let Err(e) = conn.execute_batch(&sql) {
                 conn.execute("ROLLBACK", []).ok();
-                return Err(to_napi_error(e));
+                return Err(to_napi_error_with_context(e, &sql));
             }
         }
         conn.execute("COMMIT", []).map_err(|e| {
@@ -617,7 +621,7 @@ impl Database {
                         }
                     }
                 }
-                Err(to_napi_error(e))
+                Err(to_napi_error_with_context(e, &sql))
             }
         }
     }
@@ -676,7 +680,7 @@ impl Database {
         conn.execute("BEGIN IMMEDIATE", []).map_err(to_napi_error)?;
         if let Err(e) = conn.execute_batch(&schema) {
             conn.execute("ROLLBACK", []).ok();
-            return Err(to_napi_error(e));
+            return Err(to_napi_error_with_context(e, &schema));
         }
         conn.execute("CREATE TABLE IF NOT EXISTS _schema_version (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL DEFAULT (datetime('now')), description TEXT)", []).map_err(to_napi_error)?;
         let desc = description.unwrap_or_else(|| "initial".to_string());
@@ -722,9 +726,10 @@ impl Database {
             if migration.version > current_version && migration.version <= target {
                 if let Err(e) = conn.execute_batch(&migration.sql) {
                     conn.execute("ROLLBACK", []).ok();
+                    let err = to_napi_error(e);
                     return Err(Error::from_reason(format!(
-                        "Migration {} failed: {}",
-                        migration.version, e
+                        "Migration {} failed: {} [SQL: {}]",
+                        migration.version, err.reason, migration.sql
                     )));
                 }
                 let desc = migration

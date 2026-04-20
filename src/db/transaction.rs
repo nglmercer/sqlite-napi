@@ -1,7 +1,7 @@
 //! Transaction module - provides the Transaction struct for SQLite transactions
 
 use crate::db::convert_params;
-use crate::error::to_napi_error;
+use crate::error::{to_napi_error, to_napi_error_with_context};
 use crate::models::{QueryResult, TransactionResult};
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
@@ -58,7 +58,7 @@ impl Transaction {
             rusqlite_params.iter().map(|p| p as &dyn ToSql).collect();
 
         conn.execute(&sql, params_refs.as_slice())
-            .map_err(to_napi_error)?;
+            .map_err(|e| to_napi_error_with_context(e, &sql))?;
 
         Ok(QueryResult {
             changes: conn.changes() as u32,

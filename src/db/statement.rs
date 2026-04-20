@@ -2,7 +2,7 @@
 
 use crate::db::convert_params_container;
 use crate::db::sqlite_to_json;
-use crate::error::to_napi_error;
+use crate::error::{to_napi_error, to_napi_error_with_context};
 use crate::models::QueryResult;
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
@@ -63,7 +63,9 @@ impl Statement {
             .lock()
             .map_err(|_| Error::from_reason("DB Lock failed"))?;
 
-        let mut stmt = conn.prepare(&self.sql).map_err(to_napi_error)?;
+        let mut stmt = conn
+            .prepare(&self.sql)
+            .map_err(|e| to_napi_error_with_context(e, &self.sql))?;
 
         let column_names: Vec<String> = stmt.column_names().iter().map(|s| s.to_string()).collect();
         let column_count = stmt.column_count();
@@ -74,7 +76,9 @@ impl Statement {
             crate::db::ParamsContainer::Positional(positional_params) => {
                 let params_refs: Vec<&dyn ToSql> =
                     positional_params.iter().map(|p| p as &dyn ToSql).collect();
-                let mut rows = stmt.query(params_refs.as_slice()).map_err(to_napi_error)?;
+                let mut rows = stmt
+                    .query(params_refs.as_slice())
+                    .map_err(|e| to_napi_error_with_context(e, &self.sql))?;
                 let mut results = Vec::new();
                 while let Some(row) = rows.next().map_err(to_napi_error)? {
                     let mut map = serde_json::Map::new();
@@ -95,14 +99,16 @@ impl Statement {
                 // For named params, we need to use a different approach with rusqlite
                 // rusqlite supports named parameters with :name, @name, or $name syntax
                 // We'll convert the named params to rusqlite's named parameter format
-                let mut stmt = conn.prepare(&self.sql).map_err(to_napi_error)?;
+                let mut stmt = conn
+                    .prepare(&self.sql)
+                    .map_err(|e| to_napi_error_with_context(e, &self.sql))?;
                 let mut named_params_refs: Vec<(&str, &dyn ToSql)> = Vec::new();
                 for (key, param) in named_params.iter() {
                     named_params_refs.push((key.as_str(), param as &dyn ToSql));
                 }
                 let mut rows = stmt
                     .query(named_params_refs.as_slice())
-                    .map_err(to_napi_error)?;
+                    .map_err(|e| to_napi_error_with_context(e, &self.sql))?;
                 while let Some(row) = rows.next().map_err(to_napi_error)? {
                     let mut map = serde_json::Map::new();
                     for i in 0..column_count {
@@ -128,7 +134,9 @@ impl Statement {
             .lock()
             .map_err(|_| Error::from_reason("DB Lock failed"))?;
 
-        let mut stmt = conn.prepare(&self.sql).map_err(to_napi_error)?;
+        let mut stmt = conn
+            .prepare(&self.sql)
+            .map_err(|e| to_napi_error_with_context(e, &self.sql))?;
 
         let column_names: Vec<String> = stmt.column_names().iter().map(|s| s.to_string()).collect();
         let column_count = stmt.column_count();
@@ -139,7 +147,9 @@ impl Statement {
             crate::db::ParamsContainer::Positional(positional_params) => {
                 let params_refs: Vec<&dyn ToSql> =
                     positional_params.iter().map(|p| p as &dyn ToSql).collect();
-                let mut rows = stmt.query(params_refs.as_slice()).map_err(to_napi_error)?;
+                let mut rows = stmt
+                    .query(params_refs.as_slice())
+                    .map_err(|e| to_napi_error_with_context(e, &self.sql))?;
                 if let Some(row) = rows.next().map_err(to_napi_error)? {
                     let mut map = serde_json::Map::new();
                     for i in 0..column_count {
@@ -162,7 +172,7 @@ impl Statement {
                 }
                 let mut rows = stmt
                     .query(named_params_refs.as_slice())
-                    .map_err(to_napi_error)?;
+                    .map_err(|e| to_napi_error_with_context(e, &self.sql))?;
                 if let Some(row) = rows.next().map_err(to_napi_error)? {
                     let mut map = serde_json::Map::new();
                     for i in 0..column_count {
@@ -189,7 +199,9 @@ impl Statement {
             .lock()
             .map_err(|_| Error::from_reason("DB Lock failed"))?;
 
-        let mut stmt = conn.prepare(&self.sql).map_err(to_napi_error)?;
+        let mut stmt = conn
+            .prepare(&self.sql)
+            .map_err(|e| to_napi_error_with_context(e, &self.sql))?;
 
         let params_container = convert_params_container(&env, params)?;
 
@@ -199,7 +211,7 @@ impl Statement {
                     positional_params.iter().map(|p| p as &dyn ToSql).collect();
                 let changes = stmt
                     .execute(params_refs.as_slice())
-                    .map_err(to_napi_error)?;
+                    .map_err(|e| to_napi_error_with_context(e, &self.sql))?;
                 Ok(QueryResult {
                     changes: changes as u32,
                     last_insert_rowid: conn.last_insert_rowid(),
@@ -212,7 +224,7 @@ impl Statement {
                 }
                 let changes = stmt
                     .execute(named_params_refs.as_slice())
-                    .map_err(to_napi_error)?;
+                    .map_err(|e| to_napi_error_with_context(e, &self.sql))?;
                 Ok(QueryResult {
                     changes: changes as u32,
                     last_insert_rowid: conn.last_insert_rowid(),
@@ -229,7 +241,9 @@ impl Statement {
             .lock()
             .map_err(|_| Error::from_reason("DB Lock failed"))?;
 
-        let mut stmt = conn.prepare(&self.sql).map_err(to_napi_error)?;
+        let mut stmt = conn
+            .prepare(&self.sql)
+            .map_err(|e| to_napi_error_with_context(e, &self.sql))?;
         let column_count = stmt.column_count();
 
         let params_container = convert_params_container(&env, params)?;
@@ -238,7 +252,9 @@ impl Statement {
             crate::db::ParamsContainer::Positional(positional_params) => {
                 let params_refs: Vec<&dyn ToSql> =
                     positional_params.iter().map(|p| p as &dyn ToSql).collect();
-                let mut rows = stmt.query(params_refs.as_slice()).map_err(to_napi_error)?;
+                let mut rows = stmt
+                    .query(params_refs.as_slice())
+                    .map_err(|e| to_napi_error_with_context(e, &self.sql))?;
                 let mut results = Vec::new();
                 while let Some(row) = rows.next().map_err(to_napi_error)? {
                     let mut row_arr = Vec::new();
@@ -257,7 +273,7 @@ impl Statement {
                 }
                 let mut rows = stmt
                     .query(named_params_refs.as_slice())
-                    .map_err(to_napi_error)?;
+                    .map_err(|e| to_napi_error_with_context(e, &self.sql))?;
                 let mut results = Vec::new();
                 while let Some(row) = rows.next().map_err(to_napi_error)? {
                     let mut row_arr = Vec::new();
@@ -287,7 +303,9 @@ impl Statement {
             .lock()
             .map_err(|_| Error::from_reason("DB Lock failed"))?;
 
-        let mut stmt = conn.prepare(&self.sql).map_err(to_napi_error)?;
+        let mut stmt = conn
+            .prepare(&self.sql)
+            .map_err(|e| to_napi_error_with_context(e, &self.sql))?;
         let column_names: Vec<String> = stmt.column_names().iter().map(|s| s.to_string()).collect();
         let column_count = stmt.column_count();
 
@@ -297,7 +315,9 @@ impl Statement {
             crate::db::ParamsContainer::Positional(positional_params) => {
                 let params_refs: Vec<&dyn ToSql> =
                     positional_params.iter().map(|p| p as &dyn ToSql).collect();
-                let mut rows_iter = stmt.query(params_refs.as_slice()).map_err(to_napi_error)?;
+                let mut rows_iter = stmt
+                    .query(params_refs.as_slice())
+                    .map_err(|e| to_napi_error_with_context(e, &self.sql))?;
                 let mut rows = Vec::new();
                 while let Some(row) = rows_iter.next().map_err(to_napi_error)? {
                     let mut map = serde_json::Map::new();
@@ -320,7 +340,7 @@ impl Statement {
                 }
                 let mut rows_iter = stmt
                     .query(named_params_refs.as_slice())
-                    .map_err(to_napi_error)?;
+                    .map_err(|e| to_napi_error_with_context(e, &self.sql))?;
                 let mut rows = Vec::new();
                 while let Some(row) = rows_iter.next().map_err(to_napi_error)? {
                     let mut map = serde_json::Map::new();
@@ -349,7 +369,9 @@ impl Statement {
             .conn
             .lock()
             .map_err(|_| Error::from_reason("DB Lock failed"))?;
-        let stmt = conn.prepare(&self.sql).map_err(to_napi_error)?;
+        let stmt = conn
+            .prepare(&self.sql)
+            .map_err(|e| to_napi_error_with_context(e, &self.sql))?;
 
         let column_names: Vec<String> = stmt.column_names().iter().map(|s| s.to_string()).collect();
 

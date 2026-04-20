@@ -1,7 +1,7 @@
 //! Database module - provides the Database struct for SQLite connections
 
 use crate::db::convert_params_container;
-use crate::error::to_napi_error;
+use crate::error::{to_napi_error, to_napi_error_with_context};
 use crate::models::{Migration, QueryResult};
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
@@ -187,7 +187,7 @@ impl Database {
                 let params_refs: Vec<&dyn ToSql> =
                     positional_params.iter().map(|p| p as &dyn ToSql).collect();
                 conn.execute(&sql, params_refs.as_slice())
-                    .map_err(to_napi_error)?;
+                    .map_err(|e| to_napi_error_with_context(e, &sql))?;
             }
             crate::db::ParamsContainer::Named(named_params) => {
                 let mut named_params_refs: Vec<(&str, &dyn ToSql)> = Vec::new();
@@ -195,7 +195,7 @@ impl Database {
                     named_params_refs.push((key.as_str(), param as &dyn ToSql));
                 }
                 conn.execute(&sql, named_params_refs.as_slice())
-                    .map_err(to_napi_error)?;
+                    .map_err(|e| to_napi_error_with_context(e, &sql))?;
             }
         }
 
@@ -212,7 +212,8 @@ impl Database {
             .conn
             .lock()
             .map_err(|_| Error::from_reason("DB Lock failed"))?;
-        conn.execute_batch(&sql).map_err(to_napi_error)?;
+        conn.execute_batch(&sql)
+            .map_err(|e| to_napi_error_with_context(e, &sql))?;
         Ok(QueryResult {
             changes: conn.changes() as u32,
             last_insert_rowid: conn.last_insert_rowid(),
@@ -264,7 +265,7 @@ impl Database {
         for sql in statements {
             if let Err(e) = conn.execute_batch(&sql) {
                 conn.execute("ROLLBACK", []).ok();
-                return Err(to_napi_error(e));
+                return Err(to_napi_error_with_context(e, &sql));
             }
         }
         conn.execute("COMMIT", []).map_err(|e| {
@@ -722,9 +723,10 @@ impl Database {
             if migration.version > current_version && migration.version <= target {
                 if let Err(e) = conn.execute_batch(&migration.sql) {
                     conn.execute("ROLLBACK", []).ok();
+                    let err = to_napi_error(e);
                     return Err(Error::from_reason(format!(
-                        "Migration {} failed: {}",
-                        migration.version, e
+                        "Migration {} failed: {} [SQL: {}]",
+                        migration.version, err.reason, migration.sql
                     )));
                 }
                 let desc = migration

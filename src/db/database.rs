@@ -117,7 +117,8 @@ impl Database {
         let readwrite = opts.readwrite.unwrap_or(true);
 
         let conn = if path == ":memory:" {
-            Connection::open_in_memory().map_err(to_napi_error)?
+            Connection::open_in_memory()
+                .map_err(|e| to_napi_error_with_context(e, "Opening in-memory database"))?
         } else {
             let mut flags = OpenFlags::empty();
 
@@ -136,11 +137,12 @@ impl Database {
                 flags.insert(OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE);
             }
 
-            Connection::open_with_flags(&path, flags).map_err(to_napi_error)?
+            Connection::open_with_flags(&path, flags)
+                .map_err(|e| to_napi_error_with_context(e, &format!("Opening database: {}", path)))?
         };
 
         conn.execute_batch("PRAGMA extended_result_codes = ON")
-            .map_err(to_napi_error)?;
+            .map_err(|e| to_napi_error_with_context(e, "Enabling extended result codes"))?;
 
         if !readonly {
             conn.execute_batch(
@@ -151,7 +153,7 @@ impl Database {
                  PRAGMA mmap_size = 268435456;
                  PRAGMA foreign_keys = ON;",
             )
-            .map_err(to_napi_error)?;
+            .map_err(|e| to_napi_error_with_context(e, "Initializing database settings"))?;
         }
 
         Ok(Database {
@@ -232,8 +234,9 @@ impl Database {
             Some("exclusive") => "EXCLUSIVE",
             _ => "DEFERRED",
         };
-        conn.execute(&format!("BEGIN {}", mode_str), [])
-            .map_err(to_napi_error)?;
+        let sql = format!("BEGIN {}", mode_str);
+        conn.execute(&sql, [])
+            .map_err(|e| to_napi_error_with_context(e, &sql))?;
         self.in_transaction
             .store(true, std::sync::atomic::Ordering::SeqCst);
         Ok(Transaction::new(
@@ -618,7 +621,7 @@ impl Database {
                         }
                     }
                 }
-                Err(to_napi_error(e))
+                Err(to_napi_error_with_context(e, &sql))
             }
         }
     }
@@ -677,7 +680,7 @@ impl Database {
         conn.execute("BEGIN IMMEDIATE", []).map_err(to_napi_error)?;
         if let Err(e) = conn.execute_batch(&schema) {
             conn.execute("ROLLBACK", []).ok();
-            return Err(to_napi_error(e));
+            return Err(to_napi_error_with_context(e, &schema));
         }
         conn.execute("CREATE TABLE IF NOT EXISTS _schema_version (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL DEFAULT (datetime('now')), description TEXT)", []).map_err(to_napi_error)?;
         let desc = description.unwrap_or_else(|| "initial".to_string());

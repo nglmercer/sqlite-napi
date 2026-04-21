@@ -52,9 +52,9 @@ export class Table {
         const columnDefs = this.columns.map(col => col.toSQL()).join(",\n");
         // Use tableName if available (from SQLiteTable), otherwise fall back to name
         const tableName = (this as unknown as { tableName?: string }).tableName || this.name;
-        
-        let sql = `CREATE TABLE ${tableName} (\n${columnDefs}\n)`;
-        
+
+        let sql = `CREATE TABLE IF NOT EXISTS ${tableName} (\n${columnDefs}\n)`;
+
         if (this.indexes.length > 0) {
             const indexSql = this.indexes.map(idx => {
                 const uniqueStr = idx.unique ? "UNIQUE " : "";
@@ -63,7 +63,7 @@ export class Table {
             }).join(";\n");
             sql += ";\n" + indexSql;
         }
-        
+
         return sql;
     }
 }

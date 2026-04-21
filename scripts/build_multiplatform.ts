@@ -10,6 +10,26 @@ const SDK_URL = `https://github.com/roblabla/MacOSX-SDKs/releases/download/${SDK
 const SDK_CACHE_DIR = join(os.homedir(), ".cache", "macos-sdk");
 const SDK_PATH = join(SDK_CACHE_DIR, SDK_NAME);
 
+// ── LLVM toolchain setup ────────────────────────────────────────────────────
+const LLVM_VERSION = "16.0.4";
+const LLVM_TAR = `clang+llvm-${LLVM_VERSION}-x86_64-linux-gnu-ubuntu-22.04.tar.xz`;
+const LLVM_URL = `https://github.com/llvm/llvm-project/releases/download/llvmorg-${LLVM_VERSION}/${LLVM_TAR}`;
+const LLVM_CACHE_DIR = join(os.homedir(), ".cache", "llvm-toolchain");
+const LLVM_PATH = join(LLVM_CACHE_DIR, `clang+llvm-${LLVM_VERSION}-x86_64-linux-gnu-ubuntu-22.04`);
+
+async function ensureLLVM(): Promise<string> {
+    if (existsSync(join(LLVM_PATH, "bin", "clang"))) {
+        console.log(`  ✓ LLVM toolchain found at ${LLVM_PATH}`);
+        return LLVM_PATH;
+    }
+
+    console.log(`  ⬇  Downloading portable LLVM ${LLVM_VERSION} (~400 MB)...`);
+    await $`mkdir -p ${LLVM_CACHE_DIR}`;
+    await $`curl -fsSL ${LLVM_URL} | tar -xJ -C ${LLVM_CACHE_DIR}`;
+    console.log(`  ✓ LLVM extracted to ${LLVM_PATH}`);
+    return LLVM_PATH;
+}
+
 async function ensureMacOSSdk(): Promise<string> {
     if (existsSync(SDK_PATH)) {
         console.log(`  ✓ macOS SDK found at ${SDK_PATH}`);
@@ -40,8 +60,9 @@ async function checkRequiredTools() {
 
     if (!hasClang || !hasLld) {
         console.warn("\n⚠️  Warning: 'clang' or 'lld' not found in PATH.");
-        console.warn("   These are required for Windows (MSVC) cross-compilation on Linux.");
-        console.warn("   Install them via: sudo apt-get install clang lld\n");
+        console.warn("   Downloading portable LLVM toolchain for Windows cross-compilation...");
+        const llvmPath = await ensureLLVM();
+        process.env.PATH = `${join(llvmPath, "bin")}:${process.env.PATH}`;
     }
 }
 

@@ -5,7 +5,7 @@
  * including chainable builders, indexes, and transactions.
  */
 
-import { Database } from "../index";
+import { Database } from "sqlite-napi";
 import {
     sqliteTable,
     integer,
@@ -15,7 +15,7 @@ import {
     uniqueIndex,
     sqliteNapi,
     type InferRow,
-} from "./core/index";
+} from "sqlite-napi/orm";
 
 // ============================================
 // 1. Schema Definition (Modern Fluent API)

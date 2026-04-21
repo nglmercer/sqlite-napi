@@ -22,7 +22,9 @@
     "declarationMap": false,
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"],
+      "sqlite-napi": ["./index.d.ts"],
+      "sqlite-napi/orm": ["./examples/core/index.ts"],
+      "@/*": ["./src/*"]
     },
   },
   "include": [

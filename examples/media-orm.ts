@@ -5,7 +5,7 @@
  * with metrics like views, ratings, and rankings.
  */
 
-import { Database } from "../index";
+import { Database } from "sqlite-napi";
 import {
     sqliteTable,
     integer,
@@ -14,7 +14,7 @@ import {
     index,
     sqliteNapi,
     type InferRow,
-} from "./core/index";
+} from "sqlite-napi/orm";
 
 // ============================================
 // 1. Schema Definition

@@ -241,7 +241,9 @@ Thumbs.db
 *.db-shm
 *.db-wal
 v1.0.1
-
+clang-cl
+llvm-lib
+lld-link
 # Lock files (but keep bun.lock for package management)
 package-lock.json
 yarn.lock

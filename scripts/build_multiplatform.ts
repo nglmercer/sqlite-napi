@@ -4,8 +4,6 @@ import { join } from "path";
 import os from "os";
 
 // ── macOS SDK setup ─────────────────────────────────────────────────────────
-// cargo-zigbuild needs a real macOS SDK to resolve frameworks like CoreFoundation.
-// We cache it at ~/.cache/macos-sdk so it's only downloaded once.
 const SDK_VERSION = "13.3";
 const SDK_NAME = `MacOSX${SDK_VERSION}.sdk`;
 const SDK_URL = `https://github.com/roblabla/MacOSX-SDKs/releases/download/${SDK_VERSION}/${SDK_NAME}.tar.xz`;
@@ -20,7 +18,6 @@ async function ensureMacOSSdk(): Promise<string> {
 
     console.log(`  ⬇  Downloading macOS ${SDK_VERSION} SDK (~60 MB)...`);
     await $`mkdir -p ${SDK_CACHE_DIR}`;
-    // Download and extract in one pass
     await $`curl -fsSL ${SDK_URL} | tar -xJ -C ${SDK_CACHE_DIR}`;
     console.log(`  ✓ macOS SDK extracted to ${SDK_PATH}`);
     return SDK_PATH;
@@ -28,19 +25,30 @@ async function ensureMacOSSdk(): Promise<string> {
 
 // ── Build targets ───────────────────────────────────────────────────────────
 const targets = [
-    { target: "x86_64-pc-windows-msvc", cross: true, apple: false },
-    // aarch64-pc-windows-msvc: napi-cross doesn't support this triple from x64 host.
-    // We must invoke cargo-xwin directly (which auto-downloads the aarch64 SDK) then
-    // call napi build with the xwin env vars set manually.
-    { target: "aarch64-pc-windows-msvc", xwinDirect: true, apple: false },
-    { target: "x86_64-apple-darwin", cross: true, apple: true },
-    { target: "aarch64-apple-darwin", cross: true, apple: true },
-    { target: "aarch64-unknown-linux-gnu", cross: true, apple: false },
-    { target: "x86_64-unknown-linux-gnu", native: true, apple: false },
+    { target: "x86_64-pc-windows-msvc", xwin: true },
+    { target: "aarch64-pc-windows-msvc", xwin: true },
+    { target: "x86_64-apple-darwin", apple: true },
+    { target: "aarch64-apple-darwin", apple: true },
+    { target: "aarch64-unknown-linux-gnu", napiCross: true },
+    { target: "x86_64-unknown-linux-gnu", native: true },
 ] as const;
+
+// ── Tool checks ──────────────────────────────────────────────────────────────
+async function checkRequiredTools() {
+    const hasClang = (await $`which clang`.quiet().nothrow()).exitCode === 0;
+    const hasLld = (await $`which lld`.quiet().nothrow()).exitCode === 0;
+
+    if (!hasClang || !hasLld) {
+        console.warn("\n⚠️  Warning: 'clang' or 'lld' not found in PATH.");
+        console.warn("   These are required for Windows (MSVC) cross-compilation on Linux.");
+        console.warn("   Install them via: sudo apt-get install clang lld\n");
+    }
+}
 
 // ── Main ────────────────────────────────────────────────────────────────────
 console.log("🚀 Starting Multiplatform Build Process...\n");
+
+await checkRequiredTools();
 
 // 1. Install Rust targets
 console.log("📦 Ensuring Rust targets are installed...");
@@ -48,21 +56,18 @@ for (const { target } of targets) {
     try {
         await $`rustup target add ${target}`.quiet();
     } catch {
-        // already installed or unavailable, safe to ignore
+        // already installed or unavailable
     }
 }
 
-// 2. Pre-download macOS SDK (shared across both Darwin targets)
+// 2. Pre-download macOS SDK
 let sdkRoot: string | undefined;
-const needsApple = targets.some((t) => t.apple);
-if (needsApple) {
+if (targets.some(t => "apple" in t)) {
     console.log("\n🍎 Preparing macOS SDK for cross-compilation...");
     try {
         sdkRoot = await ensureMacOSSdk();
     } catch (e) {
         console.error("  ⚠️  Failed to obtain macOS SDK:", (e as Error).message);
-        console.error("     macOS builds will likely fail. Set SDKROOT manually to fix.");
-        // Honour a manually set SDKROOT if available
         sdkRoot = process.env.SDKROOT;
     }
 }
@@ -76,39 +81,29 @@ for (const cfg of targets) {
 
     try {
         if ("native" in cfg && cfg.native) {
-            // Host build — no cross-compilation flags needed
             await $`npx napi build --release --platform`;
 
         } else if ("napiCross" in cfg && cfg.napiCross) {
-            // Linux cross (napi-cross docker image / qemu)
             await $`npx napi build --release --target ${target} --use-napi-cross --platform`;
 
-        } else if ("xwinDirect" in cfg && cfg.xwinDirect) {
-            // aarch64-pc-windows-msvc: napi-cross toolchain doesn't support this triple
-            // from an x64 Linux host. Use cargo-xwin directly by setting XWIN_ARCH so
-            // it downloads the ARM64 Windows SDK instead of the default x64 one.
-            const env = {
-                ...process.env,
-                XWIN_ARCH: "aarch64",
-                // Ensure cargo picks up xwin's sysroot for the linker
-                CARGO_TARGET_AARCH64_PC_WINDOWS_MSVC_LINKER: "lld-link",
+        } else if ("xwin" in cfg && cfg.xwin) {
+            // Windows MSVC cross-compilation
+            const isArm = target.startsWith("aarch64");
+            const env = { 
+                ...process.env, 
+                XWIN_ARCH: isArm ? "aarch64" : "x86_64" 
             };
+            // Use --cross-compile which invokes cargo-xwin
             await $`npx napi build --release --target ${target} --cross-compile --platform`.env(env);
 
-        } else if ("cross" in cfg && cfg.cross) {
-            if (cfg.apple && sdkRoot) {
-                // macOS cross: set SDKROOT so cargo-zigbuild can find frameworks
-                process.env.SDKROOT = sdkRoot;
-                await $`npx napi build --release --target ${target} --cross-compile --platform`;
-                delete process.env.SDKROOT;
-            } else if (cfg.apple) {
-                // No SDK available — skip gracefully
-                console.warn(`  ⚠️  Skipping ${target}: no macOS SDK available (set SDKROOT to fix)`);
+        } else if ("apple" in cfg && cfg.apple) {
+            if (sdkRoot) {
+                const env = { ...process.env, SDKROOT: sdkRoot };
+                await $`npx napi build --release --target ${target} --cross-compile --platform`.env(env);
+            } else {
+                console.warn(`  ⚠️  Skipping ${target}: no macOS SDK`);
                 results.push({ target, success: false });
                 continue;
-            } else {
-                // Linux / Windows / other cross targets (cargo-zigbuild or cargo-xwin)
-                await $`npx napi build --release --target ${target} --cross-compile --platform`;
             }
         }
 

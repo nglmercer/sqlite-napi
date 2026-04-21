@@ -51,14 +51,11 @@
     "lint": "rustup run stable cargo clippy -- -D warnings"
   },
   "devDependencies": {
-    "@napi-rs/cli": "^3.5.1",
+    "@napi-rs/cli": "^3.6.2",
     "@types/bun": "^1.1.12",
     "commander": "^14.0.3",
     "tsx": "^4.21.0",
-    "typescript": "^5.6.2",
-    "zod": "^4.3.6",
-    "zod-to-ts": "^2.0.0",
-    "sqlite-napi": "^1.0.1"
+    "typescript": "^5.6.2"
   },
   "peerDependencies": {
     "bun": ">=1.0.0"

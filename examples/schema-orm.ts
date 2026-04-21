@@ -1,220 +1,166 @@
 /**
- * ORM Example (Drizzle-style)
+ * Modern ORM Example (Drizzle-style)
  * 
- * Demonstrates how to use the Drizzle-compatible adapter and schema builders
+ * Demonstrates the full capabilities of the sqlite-napi ORM adapter,
+ * including chainable builders, indexes, and transactions.
  */
 
 import { Database } from "../index";
 import {
-  sqliteTable,
-  integer,
-  text,
-  boolean,
-  primaryKey,
-  notNull,
-  unique,
-  default_,
-  references,
-  sqliteNapi,
-  type InferRow,
+    sqliteTable,
+    integer,
+    text,
+    boolean,
+    index,
+    uniqueIndex,
+    sqliteNapi,
+    type InferRow,
 } from "./core/index";
 
 // ============================================
-// Schema Definition
+// 1. Schema Definition (Modern Fluent API)
 // ============================================
 
+// Users table with constraints and indexes
 const users = sqliteTable("users", {
-  id: primaryKey(integer("id")),
-  email: notNull(unique(text("email"))),
-  name: text("name"),
-  password_hash: notNull(text("password_hash")),
-  active: default_(boolean("active"), 1),
-  role: default_(text("role"), "user"),
-  created_at: default_(text("created_at"), "CURRENT_TIMESTAMP"),
-});
+    id: integer("id").primaryKey().autoincrement(),
+    email: text("email").notNull().unique(),
+    name: text("name").notNull(),
+    active: boolean("active").notNull().default(1),
+    role: text("role").notNull().default("user"),
+    createdAt: text("created_at").notNull().default("(CURRENT_TIMESTAMP)"),
+}, (table) => ({
+    emailIdx: uniqueIndex("email_idx", [table.email.name]),
+    roleIdx: index("role_idx", [table.role.name]),
+}));
 
+// Posts table with foreign key and indexes
 const posts = sqliteTable("posts", {
-  id: primaryKey(integer("id")),
-  user_id: notNull(references(integer("user_id"), { table: "users", column: "id" })),
-  title: notNull(text("title")),
-  slug: unique(text("slug")),
-  content: text("content"),
-  published: default_(boolean("published"), 0),
-  created_at: default_(text("created_at"), "CURRENT_TIMESTAMP")
-});
+    id: integer("id").primaryKey().autoincrement(),
+    userId: integer("user_id").notNull().references("users", "id"),
+    title: text("title").notNull(),
+    slug: text("slug").notNull().unique(),
+    content: text("content"),
+    published: boolean("published").notNull().default(0),
+    createdAt: text("created_at").notNull().default("(CURRENT_TIMESTAMP)")
+}, (table) => ({
+    userPostsIdx: index("user_posts_idx", [table.userId.name]),
+    publishedIdx: index("published_idx", [table.published.name]),
+}));
 
 // Infer types from schema
-type User = InferRow<typeof users>;
-type Post = InferRow<typeof posts>;
+export type User = InferRow<typeof users>;
+export type Post = InferRow<typeof posts>;
 
-function exampleSchemaDefinition() {
-  console.log("=== Schema Definition ===\n");
+// ============================================
+// 2. High-Level Service Pattern
+// ============================================
 
-  const db = new Database(":memory:");
-  const adapter = sqliteNapi(db);
+class BlogService {
+    private adapter: ReturnType<typeof sqliteNapi>;
 
-  // Sync schema (creates tables and adds missing columns automatically)
-  adapter.sync([users, posts]);
+    constructor(db: Database) {
+        this.adapter = sqliteNapi(db);
+        // Sync schema (idempotent: safe for table creation and column updates)
+        this.adapter.sync([users, posts]);
+    }
 
-  console.log("\nTables in DB:", db.getTables());
-  db.close();
+    get orm() {
+        return this.adapter;
+    }
+
+    /**
+     * Create a user and a welcome post in a single transaction
+     */
+    async setupNewUser(email: string, name: string) {
+        return this.adapter.transaction((tx) => {
+            console.log(`  [TX] Creating user: ${email}...`);
+            const userResult = tx.insert(users).values({
+                email,
+                name,
+                role: "user"
+            }).run();
+
+            const userId = Number(userResult.lastInsertRowid);
+
+            console.log(`  [TX] Creating welcome post for user ${userId}...`);
+            tx.insert(posts).values({
+                userId,
+                title: `Welcome ${name}!`,
+                slug: `welcome-${name.toLowerCase().replace(/\s+/g, '-')}`,
+                content: "This is your first post created automatically.",
+                published: 1
+            }).run();
+
+            return userId;
+        });
+    }
+
+    getUsersWithPosts() {
+        // Demonstrate complex select with join
+        return this.adapter.select(users)
+            .select("name", "email")
+            .join("posts", "users.id = posts.user_id")
+            .all();
+    }
+
+    getStats() {
+        return {
+            users: this.adapter.count(users),
+            posts: this.adapter.count(posts),
+            dbInfo: this.adapter.getMetadata()
+        };
+    }
 }
 
 // ============================================
-// Repository Pattern with Adapter
+// 3. Main Execution
 // ============================================
 
-class ModelRepository<T extends { id: number }> {
-  protected adapter: ReturnType<typeof sqliteNapi>;
-  protected table: any;
+async function main() {
+    console.log("\x1b[36m=== Modern SQLite NAPI ORM Demo ===\x1b[0m\n");
 
-  constructor(adapter: ReturnType<typeof sqliteNapi>, table: any) {
-    this.adapter = adapter;
-    this.table = table;
-  }
+    const db = new Database(":memory:");
+    const blog = new BlogService(db);
 
-  create(data: Partial<T>): number {
-    const result = this.adapter.insert(this.table).values(data as any).run();
-    return Number(result.lastInsertRowid);
-  }
+    console.log("\x1b[32m1. Atomic Transactional Setup\x1b[0m");
+    try {
+        const aliceId = await blog.setupNewUser("alice@example.com", "Alice Wonderland");
+        const bobId = await blog.setupNewUser("bob@example.com", "Bob Builder");
+        console.log(`   ✓ Setup complete. User IDs: ${aliceId}, ${bobId}`);
+    } catch (e) {
+        console.error("   ✗ Setup failed:", (e as Error).message);
+    }
 
-  findById(id: number): T | null {
-    return this.adapter.select(this.table).where("id = ?", [id]).get() as T | null;
-  }
+    console.log("\n\x1b[32m2. Transaction Rollback Verification\x1b[0m");
+    try {
+        await db.transactionFn("IMMEDIATE", []); // Just showing raw DB works alongside
+        
+        await blog.orm.transaction((tx) => {
+            tx.insert(users).values({ name: "Evil", email: "evil@fail.com" }).run();
+            console.log("   ✓ Inserted Evil (pending)...");
+            throw new Error("Simulated Failure");
+        });
+    } catch (e) {
+        console.log("   ✓ Caught expected error, transaction rolled back.");
+    }
 
-  findAll(): T[] {
-    return this.adapter.select(this.table).all() as T[];
-  }
+    console.log("\n\x1b[32m3. Relational Queries (JOIN)\x1b[0m");
+    const feed = blog.getUsersWithPosts();
+    console.log("   Users with activity:", feed);
 
-  update(id: number, data: Partial<T>): boolean {
-    const result = this.adapter.update(this.table)
-      .set(data as any)
-      .where("id = ?", [id])
-      .run();
-    return result.changes > 0;
-  }
+    console.log("\n\x1b[32m4. Schema Introspection\x1b[0m");
+    const stats = blog.getStats();
+    console.log(`   Total Users: ${stats.users}`);
+    console.log(`   Total Posts: ${stats.posts}`);
+    console.log(`   SQLite Version: ${stats.dbInfo.sqlite_version}`);
 
-  delete(id: number): boolean {
-    const result = this.adapter.delete(this.table)
-      .where("id = ?", [id])
-      .run();
-    return result.changes > 0;
-  }
+    console.log("\n\x1b[32m5. Schema Migration Check\x1b[0m");
+    console.log("   Current Tables:", blog.orm.getTables());
+
+    db.close();
+    console.log("\n\x1b[36m✓ end\x1b[0m");
 }
 
-class UserRepository extends ModelRepository<User> {
-  constructor(adapter: ReturnType<typeof sqliteNapi>) {
-    super(adapter, users);
-  }
-
-  findByEmail(email: string): User | null {
-    return this.adapter.select(users).where("email = ?", [email]).get() as User | null;
-  }
-
-  createUser(email: string, passwordHash: string, name?: string): number {
-    return this.create({
-      email,
-      password_hash: passwordHash,
-      name: name || undefined,
-      active: 1,
-      role: "user"
-    });
-  }
-}
-
-class PostRepository extends ModelRepository<Post> {
-  constructor(adapter: ReturnType<typeof sqliteNapi>) {
-    super(adapter, posts);
-  }
-
-  findPublished(): Post[] {
-    return this.adapter.select(posts)
-      .where("published = 1")
-      .orderBy("created_at", "desc")
-      .all() as Post[];
-  }
-
-  findBySlug(slug: string): Post | null {
-    return this.adapter.select(posts).where("slug = ?", [slug]).get() as Post | null;
-  }
-
-  createPost(userId: number, title: string, content?: string): number {
-    const slug = title.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "");
-    return this.create({
-      user_id: userId,
-      title,
-      slug,
-      content: content || undefined,
-      published: 0
-    });
-  }
-}
-
-class SQLiteORM {
-  public users: UserRepository;
-  public posts: PostRepository;
-  private db: Database;
-  private adapter: ReturnType<typeof sqliteNapi>;
-
-  constructor(dbPath: string = ":memory:") {
-    this.db = new Database(dbPath);
-    this.adapter = sqliteNapi(this.db);
-    this.users = new UserRepository(this.adapter);
-    this.posts = new PostRepository(this.adapter);
-  }
-
-  static init(dbPath: string): SQLiteORM {
-    const orm = new SQLiteORM(dbPath);
-
-    // Auto-sync schema (safe for updates)
-    orm.adapter.sync([users, posts]);
-
-    return orm;
-  }
-
-  getDatabase(): Database {
-    return this.db;
-  }
-
-  close(): void {
-    this.db.close();
-  }
-}
-
-function exampleORM() {
-  console.log("\n=== Repository Pattern with Driver Adapter ===\n");
-
-  const orm = SQLiteORM.init(":memory:");
-
-  const user1Id = orm.users.createUser("alice@example.com", "hash123", "Alice");
-  const user2Id = orm.users.createUser("bob@example.com", "hash456", "Bob");
-
-  console.log(`Users created: ${user1Id}, ${user2Id}`);
-
-  const alice = orm.users.findByEmail("alice@example.com");
-  console.log("User found:", alice?.name, `(${alice?.email})`);
-
-  const postId = orm.posts.createPost(user1Id, "My first post", "Post content about SQLite NAPI");
-  console.log(`Post created with ID: ${postId}`);
-
-  orm.posts.update(postId, { published: 1 });
-  console.log("Post published via update");
-
-  const publishedPosts = orm.posts.findPublished();
-  console.log("Published posts count:", publishedPosts.length);
-  if (publishedPosts.length > 0) {
-    console.log("Latest post title:", publishedPosts[0].title);
-  }
-
-  const allUsers = orm.users.findAll();
-  console.log("All users emails:", allUsers.map(u => u.email).join(", "));
-
-  orm.close();
-}
-
-// Run examples
-exampleSchemaDefinition();
-exampleORM();
-
-console.log("\n✓ end");
+main().catch(console.error);
 

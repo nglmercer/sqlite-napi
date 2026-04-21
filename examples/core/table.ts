@@ -82,8 +82,8 @@ export class SQLiteTable<T extends Record<string, any>> extends Table {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     [key: string]: unknown;
 
-    // Store column definitions for type inference
-    readonly _columns!: T;
+    // Store column definitions for type inference and mapping
+    readonly columnMap: T;
 
     constructor(name: string, columns: T, indexes?: IndexConfig[]) {
         // Store table name BEFORE calling super to avoid conflicts
@@ -97,12 +97,13 @@ export class SQLiteTable<T extends Record<string, any>> extends Table {
 
         // Store table name separately after super
         this.tableName = tableName;
+        this.columnMap = columns;
 
         // Create getters for each column (skip if property already exists as own property)
-        for (const col of this.columns) {
-            // Only define getter if it's not the tableName property
-            if (col.name !== 'tableName' && !Object.prototype.hasOwnProperty.call(this, col.name)) {
-                Object.defineProperty(this, col.name, {
+        for (const [key, col] of Object.entries(columns)) {
+            // Only define getter if it's not the tableName property and key is not already defined
+            if (key !== 'tableName' && !Object.prototype.hasOwnProperty.call(this, key)) {
+                Object.defineProperty(this, key, {
                     get: () => col,
                     enumerable: true,
                     configurable: false,

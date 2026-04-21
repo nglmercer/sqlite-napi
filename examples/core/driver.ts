@@ -36,12 +36,12 @@ export interface Queryable {
 
 export interface SqliteNapiAdapter {
     // Query execution - now properly typed with table's row type
-    select<T extends AnySQLiteTable>(table: T): SelectBuilder<InferRow<T>>;
+    select<T extends AnySQLiteTable>(table: T): SelectBuilder<T>;
 
     // Table operations
-    insert<T extends AnySQLiteTable>(table: T): InsertBuilder<InferRow<T>>;
-    update<T extends AnySQLiteTable>(table: T): UpdateBuilder<InferRow<T>>;
-    delete<T extends AnySQLiteTable>(table: T): DeleteBuilder<InferRow<T>>;
+    insert<T extends AnySQLiteTable>(table: T): InsertBuilder<T>;
+    update<T extends AnySQLiteTable>(table: T): UpdateBuilder<T>;
+    delete<T extends AnySQLiteTable>(table: T): DeleteBuilder<T>;
 
     // Transactions
     transaction<T>(cb: (tx: SqliteNapiAdapter) => T, mode?: string): T;
@@ -49,7 +49,7 @@ export interface SqliteNapiAdapter {
     // Helpers
     count(table: AnySQLiteTable, condition?: { where: string; params: unknown[] }): number;
     pragma(name: string, value?: unknown): any;
-    
+
     // Raw SQL
     execute(sql: string, params?: unknown[]): QueryResult;
     query<T>(sql: string): PreparedQuery<T>;
@@ -74,7 +74,7 @@ export interface PreparedQuery<T> {
 // Query Builders
 // ============================================
 
-class SelectBuilder<T> {
+class SelectBuilder<T extends AnySQLiteTable> {
     private _columns: string = "*";
     private _distinct: boolean = false;
     private _joins: string[] = [];
@@ -84,19 +84,17 @@ class SelectBuilder<T> {
     private _orderBys: string[] = [];
     private _limit: number | null = null;
     private _offset: number | null = null;
+    private _tableName: string;
 
     constructor(
         private db: Queryable,
-        private tableName: string
-    ) { }
-
-    as(alias: string): this {
-        this.tableName += ` ${alias}`;
-        return this;
+        private table: T
+    ) {
+        this._tableName = table.name;
     }
 
-    from(tableName: string): this {
-        this.tableName = tableName;
+    as(alias: string): this {
+        this._tableName += ` ${alias}`;
         return this;
     }
 
@@ -105,9 +103,13 @@ class SelectBuilder<T> {
         return this;
     }
 
-    select<K extends keyof T>(...columns: K[]): SelectBuilder<Pick<T, K>> {
-        this._columns = columns.join(", ");
-        return this as unknown as SelectBuilder<Pick<T, K>>;
+    select<K extends keyof InferRow<T>>(...columns: K[]): SelectBuilder<T> {
+        const dbColumns = columns.map(k => {
+            const col = (this.table as any).columnMap[k as string];
+            return col ? col.name : String(k);
+        });
+        this._columns = dbColumns.join(", ");
+        return this;
     }
 
     selectRaw(sql: string): this {
@@ -139,8 +141,10 @@ class SelectBuilder<T> {
         return this;
     }
 
-    orderBy(column: string, direction: "asc" | "desc" = "asc"): this {
-        this._orderBys.push(`${column} ${direction.toUpperCase()}`);
+    orderBy(column: keyof InferRow<T> | string, direction: "asc" | "desc" = "asc"): this {
+        const col = (this.table as any).columnMap[column as string];
+        const dbCol = col ? col.name : String(column);
+        this._orderBys.push(`${dbCol} ${direction.toUpperCase()}`);
         return this;
     }
 
@@ -155,7 +159,7 @@ class SelectBuilder<T> {
     }
 
     private build(): string {
-        let sql = `SELECT ${this._distinct ? "DISTINCT " : ""}${this._columns} FROM ${this.tableName}`;
+        let sql = `SELECT ${this._distinct ? "DISTINCT " : ""}${this._columns} FROM ${this._tableName}`;
 
         if (this._joins.length > 0) {
             sql += ` ${this._joins.join(" ")}`;
@@ -184,20 +188,20 @@ class SelectBuilder<T> {
         return [...this._joinParams, ...this._whereParams, ...(extra || [])];
     }
 
-    all(params?: unknown[]): T[] {
+    all(params?: unknown[]): InferRow<T>[] {
         const sql = this.build();
         const p = this.getFinalParams(params);
-        
+
         if (this.db.query) {
-            return this.db.query(sql).all(p) as T[];
+            return this.db.query(sql).all(p) as InferRow<T>[];
         } else {
             throw new Error("SELECT is not yet supported inside Transaction. Use Database directly or raw SQL.");
         }
     }
 
-    get(params?: unknown[]): T | undefined {
+    get(params?: unknown[]): InferRow<T> | undefined {
         if (this.db.query) {
-            return this.db.query(this.build()).get(this.getFinalParams(params)) as T | undefined;
+            return this.db.query(this.build()).get(this.getFinalParams(params)) as InferRow<T> | undefined;
         }
         throw new Error("SELECT is not yet supported inside Transaction.");
     }
@@ -207,49 +211,64 @@ class SelectBuilder<T> {
     }
 }
 
-class InsertBuilder<T> {
+class InsertBuilder<T extends AnySQLiteTable> {
     constructor(
         private db: Queryable,
-        private tableName: string
+        private table: T
     ) { }
 
-    values(v: Partial<T>): InsertBuilder<T> {
+    values(v: Partial<InferRow<T>>): InsertBuilder<T> {
         this.rowData = v;
         return this;
     }
 
-    private rowData: Partial<T> = {} as T;
+    private rowData: Partial<InferRow<T>> = {};
 
     run(): QueryResult {
-        const keys = Object.keys(this.rowData) as (keyof T)[];
+        const keys = Object.keys(this.rowData);
         if (keys.length === 0) {
-            throw new Error(`Insert failed: No data provided for table '${this.tableName}'`);
+            throw new Error(`Insert failed: No data provided for table '${this.table.name}'`);
         }
-        const insertValues = keys.map(k => this.rowData[k]);
-        const placeholders = keys.map(() => "?").join(", ");
-        const columns = keys.join(", ");
 
-        const sql = `INSERT INTO ${this.tableName} (${columns}) VALUES (${placeholders})`;
+        const dbColumns: string[] = [];
+        const values: unknown[] = [];
+
+        for (const key of keys) {
+            const col = (this.table as any).columnMap[key];
+            if (col) {
+                dbColumns.push(col.name);
+                values.push((this.rowData as any)[key]);
+            } else {
+                // Fallback for raw keys
+                dbColumns.push(key);
+                values.push((this.rowData as any)[key]);
+            }
+        }
+
+        const placeholders = dbColumns.map(() => "?").join(", ");
+        const columns = dbColumns.join(", ");
+
+        const sql = `INSERT INTO ${this.table.name} (${columns}) VALUES (${placeholders})`;
         try {
-            return this.db.run(sql, insertValues);
+            return this.db.run(sql, values);
         } catch (e) {
-            throw new Error(`[${this.tableName}] INSERT error: ${(e as Error).message}`);
+            throw new Error(`[${this.table.name}] INSERT error: ${(e as Error).message}`);
         }
     }
 }
 
-class UpdateBuilder<T> {
+class UpdateBuilder<T extends AnySQLiteTable> {
     constructor(
         private db: Queryable,
-        private tableName: string
+        private table: T
     ) { }
 
-    set(v: Partial<T>): UpdateBuilder<T> {
+    set(v: Partial<InferRow<T>>): UpdateBuilder<T> {
         this.updateData = v;
         return this;
     }
 
-    private updateData: Partial<T> = {} as T;
+    private updateData: Partial<InferRow<T>> = {};
 
     where(condition: string, params?: unknown[]): UpdateBuilder<T> {
         this._whereCondition = condition;
@@ -261,15 +280,22 @@ class UpdateBuilder<T> {
     private _whereParams: unknown[] = [];
 
     run(): QueryResult {
-        const keys = Object.keys(this.updateData) as (keyof T)[];
+        const keys = Object.keys(this.updateData);
         if (keys.length === 0) {
-            throw new Error(`Update failed: No data provided to 'set' for table '${this.tableName}'`);
+            throw new Error(`Update failed: No data provided to 'set' for table '${this.table.name}'`);
         }
-        const updateValues = keys.map(k => this.updateData[k]);
-        const setClause = keys.map(k => `${String(k)} = ?`).join(", ");
 
-        let sql = `UPDATE ${this.tableName} SET ${setClause}`;
-        const params: unknown[] = [...updateValues];
+        const setClauses: string[] = [];
+        const params: unknown[] = [];
+
+        for (const key of keys) {
+            const col = (this.table as any).columnMap[key];
+            const dbCol = col ? col.name : key;
+            setClauses.push(`${dbCol} = ?`);
+            params.push((this.updateData as any)[key]);
+        }
+
+        let sql = `UPDATE ${this.table.name} SET ${setClauses.join(", ")}`;
 
         if (this._whereCondition) {
             sql += ` WHERE ${this._whereCondition}`;
@@ -279,15 +305,15 @@ class UpdateBuilder<T> {
         try {
             return this.db.run(sql, params);
         } catch (e) {
-            throw new Error(`ORM Update for '${this.tableName}' failed: ${(e as Error).message}`);
+            throw new Error(`ORM Update for '${this.table.name}' failed: ${(e as Error).message}`);
         }
     }
 }
 
-class DeleteBuilder<T> {
+class DeleteBuilder<T extends AnySQLiteTable> {
     constructor(
         private db: Queryable,
-        private tableName: string
+        private table: T
     ) { }
 
     where(condition: string, params?: unknown[]): DeleteBuilder<T> {
@@ -300,7 +326,7 @@ class DeleteBuilder<T> {
     private _whereParams: unknown[] = [];
 
     run(): QueryResult {
-        let sql = `DELETE FROM ${this.tableName}`;
+        let sql = `DELETE FROM ${this.table.name}`;
         const params: unknown[] = [];
 
         if (this._whereCondition) {
@@ -311,7 +337,7 @@ class DeleteBuilder<T> {
         try {
             return this.db.run(sql, params);
         } catch (e) {
-            throw new Error(`ORM Delete from '${this.tableName}' failed: ${(e as Error).message}`);
+            throw new Error(`ORM Delete from '${this.table.name}' failed: ${(e as Error).message}`);
         }
     }
 }
@@ -325,20 +351,20 @@ class DeleteBuilder<T> {
  */
 export function sqliteNapi(db: SqliteNapiDatabase | Transaction): SqliteNapiAdapter {
     const adapter: SqliteNapiAdapter = {
-        select<T extends AnySQLiteTable>(table?: T): SelectBuilder<InferRow<T>> {
-            return new SelectBuilder<InferRow<T>>(db as Queryable, table ? table.name : "");
+        select<T extends AnySQLiteTable>(table: T): SelectBuilder<T> {
+            return new SelectBuilder<T>(db as Queryable, table);
         },
 
-        insert<T extends AnySQLiteTable>(table: T): InsertBuilder<InferRow<T>> {
-            return new InsertBuilder<InferRow<T>>(db as Queryable, table.name);
+        insert<T extends AnySQLiteTable>(table: T): InsertBuilder<T> {
+            return new InsertBuilder<T>(db as Queryable, table);
         },
 
-        update<T extends AnySQLiteTable>(table: T): UpdateBuilder<InferRow<T>> {
-            return new UpdateBuilder<InferRow<T>>(db as Queryable, table.name);
+        update<T extends AnySQLiteTable>(table: T): UpdateBuilder<T> {
+            return new UpdateBuilder<T>(db as Queryable, table);
         },
 
-        delete<T extends AnySQLiteTable>(table: T): DeleteBuilder<InferRow<T>> {
-            return new DeleteBuilder<InferRow<T>>(db as Queryable, table.name);
+        delete<T extends AnySQLiteTable>(table: T): DeleteBuilder<T> {
+            return new DeleteBuilder<T>(db as Queryable, table);
         },
 
         transaction<T>(cb: (tx: SqliteNapiAdapter) => T, mode?: string): T {
@@ -360,7 +386,7 @@ export function sqliteNapi(db: SqliteNapiDatabase | Transaction): SqliteNapiAdap
 
         count(table: AnySQLiteTable, condition?: { where: string; params: unknown[] }): number {
             if (!('query' in db)) throw new Error("Count requires Database object (query support)");
-            
+
             let sql = `SELECT COUNT(*) as count FROM ${table.name}`;
             const params: unknown[] = condition?.params ?? [];
             if (condition?.where) {

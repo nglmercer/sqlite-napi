@@ -194,12 +194,19 @@ class InsertBuilder<T> {
 
     run(): QueryResult {
         const keys = Object.keys(this.rowData) as (keyof T)[];
+        if (keys.length === 0) {
+            throw new Error(`Insert failed: No data provided for table '${this.tableName}'`);
+        }
         const insertValues = keys.map(k => this.rowData[k]);
         const placeholders = keys.map(() => "?").join(", ");
         const columns = keys.join(", ");
 
         const sql = `INSERT INTO ${this.tableName} (${columns}) VALUES (${placeholders})`;
-        return this.db.run(sql, insertValues);
+        try {
+            return this.db.run(sql, insertValues);
+        } catch (e) {
+            throw new Error(`ORM Insert into '${this.tableName}' failed: ${(e as Error).message}`);
+        }
     }
 }
 
@@ -227,6 +234,9 @@ class UpdateBuilder<T> {
 
     run(): QueryResult {
         const keys = Object.keys(this.updateData) as (keyof T)[];
+        if (keys.length === 0) {
+            throw new Error(`Update failed: No data provided to 'set' for table '${this.tableName}'`);
+        }
         const updateValues = keys.map(k => this.updateData[k]);
         const setClause = keys.map(k => `${String(k)} = ?`).join(", ");
 
@@ -238,7 +248,11 @@ class UpdateBuilder<T> {
             params.push(...this._whereParams);
         }
 
-        return this.db.run(sql, params);
+        try {
+            return this.db.run(sql, params);
+        } catch (e) {
+            throw new Error(`ORM Update for '${this.tableName}' failed: ${(e as Error).message}`);
+        }
     }
 }
 
@@ -266,7 +280,11 @@ class DeleteBuilder<T> {
             params.push(...this._whereParams);
         }
 
-        return this.db.run(sql, params);
+        try {
+            return this.db.run(sql, params);
+        } catch (e) {
+            throw new Error(`ORM Delete from '${this.tableName}' failed: ${(e as Error).message}`);
+        }
     }
 }
 

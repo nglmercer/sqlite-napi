@@ -240,6 +240,7 @@ Thumbs.db
 *.orig
 *.db-shm
 *.db-wal
+v1.0.1
 
 # Lock files (but keep bun.lock for package management)
 package-lock.json

@@ -205,7 +205,7 @@ class InsertBuilder<T> {
         try {
             return this.db.run(sql, insertValues);
         } catch (e) {
-            throw new Error(`ORM Insert into '${this.tableName}' failed: ${(e as Error).message}`);
+            throw new Error(`[${this.tableName}] INSERT error: ${(e as Error).message}`);
         }
     }
 }

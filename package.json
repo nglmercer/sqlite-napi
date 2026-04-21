@@ -41,6 +41,7 @@
   ],
   "scripts": {
     "build": "napi build --platform --release",
+    "build:all": "bun ./scripts/build_multiplatform.ts",
     "build:debug": "napi build --platform",
     "clean": "napi clean && cargo clean",
     "test": "bun test",

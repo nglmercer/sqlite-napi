@@ -16,7 +16,6 @@ import {
   default_,
   references,
   sqliteNapi,
-  getTablesSQL,
   type InferRow,
 } from "./core/index";
 
@@ -52,12 +51,10 @@ function exampleSchemaDefinition() {
   console.log("=== Schema Definition ===\n");
 
   const db = new Database(":memory:");
+  const adapter = sqliteNapi(db);
 
-  // Create tables using generated SQL
-  const sql = getTablesSQL([users, posts]);
-  console.log("Generated SQL:\n", sql);
-
-  db.exec(sql);
+  // Sync schema (creates tables and adds missing columns automatically)
+  adapter.sync([users, posts]);
 
   console.log("\nTables in DB:", db.getTables());
   db.close();
@@ -169,9 +166,8 @@ class SQLiteORM {
   static init(dbPath: string): SQLiteORM {
     const orm = new SQLiteORM(dbPath);
 
-    // Auto-initialize schema
-    const sql = getTablesSQL([users, posts]);
-    orm.db.exec(sql);
+    // Auto-sync schema (safe for updates)
+    orm.adapter.sync([users, posts]);
 
     return orm;
   }

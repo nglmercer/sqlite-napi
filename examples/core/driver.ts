@@ -41,6 +41,9 @@ export interface SqliteNapiAdapter {
     // Raw SQL
     execute(sql: string, params?: unknown[]): QueryResult;
     query<T>(sql: string): PreparedQuery<T>;
+
+    // Schema sync
+    sync(tables: AnySQLiteTable[]): void;
 }
 
 export interface PreparedQuery<T> {
@@ -331,6 +334,25 @@ export function sqliteNapi(db: SqliteNapiDatabase): SqliteNapiAdapter {
                     return stmt.run(params);
                 },
             };
+        },
+
+        sync(tables: AnySQLiteTable[]): void {
+            for (const table of tables) {
+                // 1. Create table if not exists
+                db.createTableIfNotExists(table.getSQL());
+
+                // 2. Check for missing columns and add them
+                for (const col of table.getColumns()) {
+                    // Skip primary keys as they must be created with the table
+                    if (col.primaryKey) continue;
+
+                    db.addColumnIfNotExists(
+                        table.name,
+                        col.name,
+                        col.getDefinitionSQL()
+                    );
+                }
+            }
         },
     };
 }

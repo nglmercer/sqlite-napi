@@ -56,13 +56,20 @@ export abstract class Column<T = unknown> {
     }
 
     toSQL(): string {
-        const needsQuoting = /^(order|group|limit|offset|where|select|from|as|on|and|or|not|is|in|like|between|having|distinct|all|any|exists|case|when|then|else|end|join|left|right|inner|outer|cross|natural|using|collate|escape|recurse|with|without|row|replaced)$/i.test(this.name);
-        const colName = needsQuoting ? `"${this.name}"` : this.name;
-        let sql = `${colName} ${this.getSQLType()}`;
+        return `${this.getQuotedName()} ${this.getDefinitionSQL()}`;
+    }
 
+    getQuotedName(): string {
+        const needsQuoting = /^(order|group|limit|offset|where|select|from|as|on|and|or|not|is|in|like|between|having|distinct|all|any|exists|case|when|then|else|end|join|left|right|inner|outer|cross|natural|using|collate|escape|recurse|with|without|row|replaced)$/i.test(this.name);
+        return needsQuoting ? `"${this.name}"` : this.name;
+    }
+
+    getDefinitionSQL(): string {
         if (this.primaryKey && this.autoIncrement) {
-            return `${colName} INTEGER PRIMARY KEY AUTOINCREMENT`;
+            return `INTEGER PRIMARY KEY AUTOINCREMENT`;
         }
+
+        let sql = this.getSQLType();
 
         if (this.primaryKey) sql += " PRIMARY KEY";
         if (this.notNull && !this.primaryKey) sql += " NOT NULL";

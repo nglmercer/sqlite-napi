@@ -260,7 +260,7 @@ export const unique = <T extends Column>(col: T): T => {
 };
 
 export const default_ = <T extends Column, V>(col: T, value: V): T => {
-    return col.default(value as any);
+    return col.default(value);
 };
 
 export const references = <T extends Column>(col: T, config: { table: string; column: string }): T => {

@@ -263,7 +263,7 @@ class InsertBuilder<T extends AnySQLiteTable> {
             } else {
                 // Fallback for raw keys
                 dbColumns.push(key);
-                values.push((this.rowData as any)[key]);
+                values.push((this.rowData)[key]);
             }
         }
 

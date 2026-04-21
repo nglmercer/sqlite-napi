@@ -1,168 +1,144 @@
 /**
- * ORM (Prisma-like)
+ * ORM Example (Drizzle-style)
+ * 
+ * Demonstrates how to use the Drizzle-compatible adapter and schema builders
  */
 
 import { Database } from "../index";
 import {
-  SQLiteSchema,
-  Schema,
-  StandardFields,
-} from "./core";
+  sqliteTable,
+  integer,
+  text,
+  boolean,
+  primaryKey,
+  notNull,
+  unique,
+  default_,
+  references,
+  sqliteNapi,
+  getTablesSQL,
+  type InferRow,
+} from "./core/index";
+
+// ============================================
+// Schema Definition
+// ============================================
+
+const users = sqliteTable("users", {
+  id: primaryKey(integer("id")),
+  email: notNull(unique(text("email"))),
+  name: text("name"),
+  password_hash: notNull(text("password_hash")),
+  active: default_(boolean("active"), 1),
+  role: default_(text("role"), "user"),
+  created_at: default_(text("created_at"), "CURRENT_TIMESTAMP"),
+});
+
+const posts = sqliteTable("posts", {
+  id: primaryKey(integer("id")),
+  user_id: notNull(references(integer("user_id"), { table: "users", column: "id" })),
+  title: notNull(text("title")),
+  slug: unique(text("slug")),
+  content: text("content"),
+  published: default_(boolean("published"), 0),
+  created_at: default_(text("created_at"), "CURRENT_TIMESTAMP")
+});
+
+// Infer types from schema
+type User = InferRow<typeof users>;
+type Post = InferRow<typeof posts>;
 
 function exampleSchemaDefinition() {
-  console.log("=== Schema ===\n");
-
-  const schemaBuilder = new SQLiteSchema();
-
-  schemaBuilder.create("users", (s) => {
-    s.integer("id").primaryKey().autoIncrement();
-    s.text("email").notNull().unique();
-    s.text("name");
-    s.text("password_hash").notNull();
-    s.boolean("active").default(1);
-    s.text("role").default("user");
-    s.text("created_at").default("datetime('now')");
-  });
-
-  schemaBuilder.create("posts", (s) => {
-    s.integer("id").primaryKey().autoIncrement();
-    s.integer("user_id").notNull().references("users", "id");
-    s.text("title").notNull();
-    s.text("slug").unique();
-    s.text("content");
-    s.boolean("published").default(0);
-    s.text("created_at").default("datetime('now')");
-    s.index(["user_id"]);
-    s.index(["published", "created_at"]);
-  });
-
-  const migrations = schemaBuilder.toMigrations();
-
-  console.log("Generated migrations:\n");
-  
-  for (const mig of migrations) {
-    console.log(`--- Version ${mig.version} ---`);
-    console.log(mig.sql);
-    console.log();
-  }
+  console.log("=== Schema Definition ===\n");
 
   const db = new Database(":memory:");
-  
-  for (const mig of migrations) {
-    db.run(mig.sql);
-  }
 
-  console.log("Tables:", db.getTables());
-  console.log("Schema version:", db.getSchemaVersion());
+  // Create tables using generated SQL
+  const sql = getTablesSQL([users, posts]);
+  console.log("Generated SQL:\n", sql);
+
+  db.exec(sql);
+
+  console.log("\nTables in DB:", db.getTables());
+  db.close();
 }
 
-interface UserModel {
-  id: number;
-  email: string;
-  name: string | null;
-  password_hash: string;
-  active: number;
-  role: string;
-  created_at: string;
-}
-
-interface PostModel {
-  id: number;
-  user_id: number;
-  title: string;
-  slug: string | null;
-  content: string | null;
-  published: number;
-  created_at: string;
-}
+// ============================================
+// Repository Pattern with Adapter
+// ============================================
 
 class ModelRepository<T extends { id: number }> {
-  protected db: Database;
-  protected tableName: string;
+  protected adapter: ReturnType<typeof sqliteNapi>;
+  protected table: any;
 
-  constructor(db: Database, tableName: string) {
-    this.db = db;
-    this.tableName = tableName;
+  constructor(adapter: ReturnType<typeof sqliteNapi>, table: any) {
+    this.adapter = adapter;
+    this.table = table;
   }
 
   create(data: Partial<T>): number {
-    const keys = Object.keys(data).filter(k => k !== "id");
-    const values = keys.map(k => (data as any)[k]);
-    const placeholders = keys.map(() => "?").join(", ");
-    
-    const result = this.db.run(
-      `INSERT INTO ${this.tableName} (${keys.join(", ")}) VALUES (${placeholders})`,
-      values
-    );
-    
+    const result = this.adapter.insert(this.table).values(data as any).run();
     return Number(result.lastInsertRowid);
   }
 
   findById(id: number): T | null {
-    return this.db.query(`SELECT * FROM ${this.tableName} WHERE id = ?`).get([id]) as T | null;
+    return this.adapter.select(this.table).where("id = ?", [id]).get() as T | null;
   }
 
   findAll(): T[] {
-    return this.db.query(`SELECT * FROM ${this.tableName}`).all() as T[];
+    return this.adapter.select(this.table).all() as T[];
   }
 
   update(id: number, data: Partial<T>): boolean {
-    const keys = Object.keys(data).filter(k => k !== "id");
-    if (keys.length === 0) return false;
-    
-    const setClause = keys.map(k => `${k} = ?`).join(", ");
-    const values = keys.map(k => (data as any)[k]);
-    
-    const result = this.db.run(
-      `UPDATE ${this.tableName} SET ${setClause} WHERE id = ?`,
-      [...values, id]
-    );
-    
+    const result = this.adapter.update(this.table)
+      .set(data as any)
+      .where("id = ?", [id])
+      .run();
     return result.changes > 0;
   }
 
   delete(id: number): boolean {
-    const result = this.db.run(
-      `DELETE FROM ${this.tableName} WHERE id = ?`,
-      [id]
-    );
+    const result = this.adapter.delete(this.table)
+      .where("id = ?", [id])
+      .run();
     return result.changes > 0;
   }
 }
 
-class UserRepository extends ModelRepository<UserModel> {
-  constructor(db: Database) {
-    super(db, "users");
+class UserRepository extends ModelRepository<User> {
+  constructor(adapter: ReturnType<typeof sqliteNapi>) {
+    super(adapter, users);
   }
 
-  findByEmail(email: string): UserModel | null {
-    return this.db.query("SELECT * FROM users WHERE email = ?").get([email]) as UserModel | null;
+  findByEmail(email: string): User | null {
+    return this.adapter.select(users).where("email = ?", [email]).get() as User | null;
   }
 
   createUser(email: string, passwordHash: string, name?: string): number {
     return this.create({
       email,
       password_hash: passwordHash,
-      name: name || null,
+      name: name || undefined,
       active: 1,
       role: "user"
     });
   }
 }
 
-class PostRepository extends ModelRepository<PostModel> {
-  constructor(db: Database) {
-    super(db, "posts");
+class PostRepository extends ModelRepository<Post> {
+  constructor(adapter: ReturnType<typeof sqliteNapi>) {
+    super(adapter, posts);
   }
 
-  findPublished(): PostModel[] {
-    return this.db.query(
-      "SELECT * FROM posts WHERE published = 1 ORDER BY created_at DESC"
-    ).all() as PostModel[];
+  findPublished(): Post[] {
+    return this.adapter.select(posts)
+      .where("published = 1")
+      .orderBy("created_at", "desc")
+      .all() as Post[];
   }
 
-  findBySlug(slug: string): PostModel | null {
-    return this.db.query("SELECT * FROM posts WHERE slug = ?").get([slug]) as PostModel | null;
+  findBySlug(slug: string): Post | null {
+    return this.adapter.select(posts).where("slug = ?", [slug]).get() as Post | null;
   }
 
   createPost(userId: number, title: string, content?: string): number {
@@ -171,38 +147,32 @@ class PostRepository extends ModelRepository<PostModel> {
       user_id: userId,
       title,
       slug,
-      content: content || null,
+      content: content || undefined,
       published: 0
     });
-  }
-
-  publish(id: number): boolean {
-    return this.update(id, { published: 1 });
   }
 }
 
 class SQLiteORM {
   public users: UserRepository;
   public posts: PostRepository;
-  
   private db: Database;
+  private adapter: ReturnType<typeof sqliteNapi>;
 
   constructor(dbPath: string = ":memory:") {
     this.db = new Database(dbPath);
-    this.users = new UserRepository(this.db);
-    this.posts = new PostRepository(this.db);
+    this.adapter = sqliteNapi(this.db);
+    this.users = new UserRepository(this.adapter);
+    this.posts = new PostRepository(this.adapter);
   }
 
-  static init(dbPath: string, schemaBuilder: (s: SQLiteSchema) => void): SQLiteORM {
+  static init(dbPath: string): SQLiteORM {
     const orm = new SQLiteORM(dbPath);
-    const schema = new SQLiteSchema();
-    schemaBuilder(schema);
-    
-    const migrations = schema.toMigrations();
-    for (const mig of migrations) {
-      orm.db.run(mig.sql);
-    }
-    
+
+    // Auto-initialize schema
+    const sql = getTablesSQL([users, posts]);
+    orm.db.exec(sql);
+
     return orm;
   }
 
@@ -216,29 +186,9 @@ class SQLiteORM {
 }
 
 function exampleORM() {
-  console.log("\n=== Prisma-style ORM ===\n");
+  console.log("\n=== Repository Pattern with Driver Adapter ===\n");
 
-  const orm = SQLiteORM.init(":memory:", (s) => {
-    s.create("users", (t) => {
-      t.integer("id").primaryKey().autoIncrement();
-      t.text("email").notNull().unique();
-      t.text("name");
-      t.text("password_hash").notNull();
-      t.boolean("active").default(1);
-      t.text("role").default("user");
-      t.text("created_at").default("datetime('now')");
-    });
-
-    s.create("posts", (t) => {
-      t.integer("id").primaryKey().autoIncrement();
-      t.integer("user_id").notNull().references("users", "id");
-      t.text("title").notNull();
-      t.text("slug").unique();
-      t.text("content");
-      t.boolean("published").default(0);
-      t.text("created_at").default("datetime('now')");
-    });
-  });
+  const orm = SQLiteORM.init(":memory:");
 
   const user1Id = orm.users.createUser("alice@example.com", "hash123", "Alice");
   const user2Id = orm.users.createUser("bob@example.com", "hash456", "Bob");
@@ -246,51 +196,29 @@ function exampleORM() {
   console.log(`Users created: ${user1Id}, ${user2Id}`);
 
   const alice = orm.users.findByEmail("alice@example.com");
-  console.log("User found:", alice?.email);
+  console.log("User found:", alice?.name, `(${alice?.email})`);
 
-  const postId = orm.posts.createPost(user1Id, "My first post", "Post content");
+  const postId = orm.posts.createPost(user1Id, "My first post", "Post content about SQLite NAPI");
   console.log(`Post created with ID: ${postId}`);
 
-  orm.posts.publish(postId);
-  console.log("Post published");
+  orm.posts.update(postId, { published: 1 });
+  console.log("Post published via update");
 
   const publishedPosts = orm.posts.findPublished();
-  console.log("Published posts:", publishedPosts.length);
+  console.log("Published posts count:", publishedPosts.length);
+  if (publishedPosts.length > 0) {
+    console.log("Latest post title:", publishedPosts[0].title);
+  }
 
   const allUsers = orm.users.findAll();
-  console.log("All users:", allUsers.map(u => u.email).join(", "));
+  console.log("All users emails:", allUsers.map(u => u.email).join(", "));
+
+  orm.close();
 }
 
-// ============================================
-// Example: Prisma-like Model Definition
-// ============================================
-function examplePrismaModel() {
-  console.log("\n=== Prisma-like Model Definition ===\n");
-
-  // Using the new .model() method with Prisma-like syntax
-  const schema = new Schema("oauth_tokens")
-    .model({
-      id: StandardFields.UUID,
-      token: { type: String, required: true, unique: true },
-      client_id: { type: String, required: true },
-      user_id: { type: String, required: true },
-      scope: { type: String, default: "" },
-      expires_at: { type: Date, required: true },
-      is_revoked: { type: Boolean, default: false },
-      revoked_at: Date,
-      rotation_count: { type: Number, default: 0 },
-      created_at: StandardFields.CreatedAt,
-    });
-
-  console.log("SQL Schema:");
-  console.log(schema.toSQL());
-  
-  console.log("\nJSON Serialization:");
-  console.log(schema.toJsonString(2));
-}
-
+// Run examples
 exampleSchemaDefinition();
 exampleORM();
-examplePrismaModel();
 
 console.log("\n✓ end");
+

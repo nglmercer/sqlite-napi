@@ -1,66 +1,44 @@
 /**
- * SQLite NAPI - Schema Builder Core
+ * SQLite NAPI - Drizzle ORM Adapter
  * 
- * Un ORM ligero estilo Prisma para SQLite
+ * A Drizzle-compatible ORM layer for sqlite-napi
+ * Provides Drizzle-style table definitions and a driver adapter
  * 
  * @example
- *   import { Schema, SQLiteSchema, StandardFields } from "./core";
+ *   import { sqliteNapi } from "./core/drizzle";
+ *   import { Database } from "sqlite-napi";
  *   
- *   // Esquema simple
- *   const userSchema = new Schema("users")
- *     .apply(StandardFields.UUID)
- *     .text("name").notNull()
- *     .text("email").unique()
- *     .apply(StandardFields.Timestamps)
- *     .apply(StandardFields.Active);
- * 
- *   console.log(userSchema.toSQL());
- * 
- * @example
- *   // Múltiples tablas con migraciones
- *   const db = new SQLiteSchema()
- *     .create("users", (s) => {
- *       s.apply(StandardFields.UUID);
- *       s.text("name").notNull();
- *       s.text("email").unique();
- *       s.apply(StandardFields.Timestamps);
- *     })
- *     .create("posts", (s) => {
- *       s.apply(StandardFields.UUID);
- *       s.text("title").notNull();
- *       s.text("user_id").references("users", "id");
- *       s.apply(StandardFields.Timestamps);
- *     });
- * 
- *   const migrations = db.toMigrations();
- */
+ *   const db = new Database(":memory:");
+ *   const adapter = sqliteNapi(db);
+ *   
+ *   // Use with Drizzle
+ *   const users = await adapter.select(usersTable).from(usersTable);
+ * */
 
-// Re-export all modules
-export { Schema } from "./schema.js";
-export type { 
-  ColumnDefinition, 
-  SchemaDefinition, 
-  IndexDefinition,
-  SerializedSchema 
-} from "./schema.js";
-
-export { SQLiteSchema } from "./database.js";
-export type { Migration } from "./database.js";
-
+export { sqliteNapi, getTableSQL, getTablesSQL } from "./driver";
+export { sqliteTable, type SQLiteTable, type InferRow } from "./table";
 export {
-  StandardFields,
-  UUID,
-  Timestamps,
-  CreatedAt,
-  Active,
-  DeletedAt,
-  getSqliteType,
-} from "./constants.js";
-export type { 
-  StandardField,
-  FieldType,
-  ModelFieldConfig,
-  ModelDefinition,
-  ModelField,
-  SchemaOptions,
-} from "./constants.js";
+    integer,
+    text,
+    real,
+    blob,
+    numeric,
+    boolean,
+    date,
+    timestamp,
+    varchar,
+    primaryKey,
+    unique,
+    notNull,
+    default_,
+    references,
+    index,
+} from "./columns";
+export type {
+    AnyColumn,
+    Column,
+    SQLiteColumn,
+    ColumnDef,
+    ColumnBuilderConfig,
+} from "./columns";
+export type { AnySQLiteTable, TableConfig } from "./table";

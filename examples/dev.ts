@@ -1,4 +1,4 @@
-import { Database, getSqliteVersion } from "sqlite-napi";
+import { Database, getSqliteVersion } from "../index";
 
 async function main() {
   console.log("SQLite NAPI - Full API Demo\n");
@@ -79,7 +79,7 @@ async function main() {
   const tx2 = db.transaction();
   try {
     tx2.run("INSERT INTO users (name, email, age) VALUES (?, ?, ?)", ["Eve", "eve@example.com", 22]);
-    
+
     const sp = tx2.savepoint("my_savepoint");
     try {
       sp.run("INSERT INTO users (name, email, age) VALUES (?, ?, ?)", ["Frank", "frank@example.com", 27]);
@@ -89,7 +89,7 @@ async function main() {
       sp.rollback();
       console.log("Savepoint rolled back");
     }
-    
+
     tx2.commit();
     console.log("Outer transaction committed");
   } catch (e) {

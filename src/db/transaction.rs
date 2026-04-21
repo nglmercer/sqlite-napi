@@ -58,7 +58,10 @@ impl Transaction {
             rusqlite_params.iter().map(|p| p as &dyn ToSql).collect();
 
         conn.execute(&sql, params_refs.as_slice())
-            .map_err(to_napi_error)?;
+            .map_err(|e| {
+                let snippet = if sql.len() > 100 { format!("{}...", &sql[..100]) } else { sql.clone() };
+                crate::error::to_napi_error_with_context(e, Some(&format!("Query failed: {}", snippet)))
+            })?;
 
         Ok(QueryResult {
             changes: conn.changes() as u32,

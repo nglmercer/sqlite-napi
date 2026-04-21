@@ -4,7 +4,7 @@
  * Provides table creation that matches Drizzle ORM's API
  */
 
-import type { Column } from "./columns";
+import type { Column, IndexConfig } from "./columns";
 
 // ============================================
 // Table Config
@@ -13,6 +13,7 @@ import type { Column } from "./columns";
 export interface TableConfig {
     name: string;
     columns: Column[];
+    indexes?: IndexConfig[];
 }
 
 // ============================================
@@ -22,15 +23,17 @@ export interface TableConfig {
 export class Table {
     readonly name: string;
     readonly columns: Column[] = [];
+    readonly indexes: IndexConfig[] = [];
     readonly primaryKey: Column | null = null;
 
     constructor(config: TableConfig) {
         this.name = config.name;
         this.columns = config.columns;
+        this.indexes = config.indexes ?? [];
 
         // Find primary key
         for (const col of this.columns) {
-            if (col.primaryKey) {
+            if (col.isPrimaryKey) {
                 this.primaryKey = col;
                 break;
             }
@@ -49,7 +52,19 @@ export class Table {
         const columnDefs = this.columns.map(col => col.toSQL()).join(",\n");
         // Use tableName if available (from SQLiteTable), otherwise fall back to name
         const tableName = (this as unknown as { tableName?: string }).tableName || this.name;
-        return `CREATE TABLE ${tableName} (\n${columnDefs}\n)`;
+        
+        let sql = `CREATE TABLE ${tableName} (\n${columnDefs}\n)`;
+        
+        if (this.indexes.length > 0) {
+            const indexSql = this.indexes.map(idx => {
+                const uniqueStr = idx.unique ? "UNIQUE " : "";
+                const cols = idx.columns.join(", ");
+                return `CREATE ${uniqueStr}INDEX IF NOT EXISTS ${idx.name} ON ${tableName} (${cols})`;
+            }).join(";\n");
+            sql += ";\n" + indexSql;
+        }
+        
+        return sql;
     }
 }
 
@@ -70,13 +85,14 @@ export class SQLiteTable<T extends Record<string, any>> extends Table {
     // Store column definitions for type inference
     readonly _columns!: T;
 
-    constructor(name: string, columns: T) {
+    constructor(name: string, columns: T, indexes?: IndexConfig[]) {
         // Store table name BEFORE calling super to avoid conflicts
         const tableName = name;
 
         super({
             name,
             columns: Object.values(columns) as Column[],
+            indexes,
         });
 
         // Store table name separately after super
@@ -106,9 +122,16 @@ export function sqliteTable<
     C extends Record<string, Column>
 >(
     name: T,
-    columns: C
+    columns: C,
+    extraConfig?: (table: C) => Record<string, IndexConfig>
 ): SQLiteTable<C> & { name: T } {
-    const table = new SQLiteTable<C>(name, columns);
+    let indexes: IndexConfig[] | undefined;
+    if (extraConfig) {
+        const config = extraConfig(columns);
+        indexes = Object.values(config);
+    }
+
+    const table = new SQLiteTable<C>(name, columns, indexes);
     return table as SQLiteTable<C> & { name: T };
 }
 

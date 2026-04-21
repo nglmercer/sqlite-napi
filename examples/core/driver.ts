@@ -5,7 +5,7 @@
  * Allows using sqlite-napi with Drizzle query builder patterns
  */
 
-import { Database as SqliteNapiDatabase, type QueryResult } from "../../index";
+import { Database as SqliteNapiDatabase, type QueryResult, type Statement, type Transaction } from "../../index";
 import type { AnySQLiteTable, InferRow } from "./table";
 
 // ============================================
@@ -22,6 +22,14 @@ export interface SelectQuery {
     offsetCount?: number;
 }
 
+/**
+ * Interface for database-like objects that can execute queries
+ */
+export interface Queryable {
+    run(sql: string, params?: unknown): QueryResult;
+    query?(sql: string): Statement;
+}
+
 // ============================================
 // SQLite NAPI Driver
 // ============================================
@@ -35,15 +43,25 @@ export interface SqliteNapiAdapter {
     update<T extends AnySQLiteTable>(table: T): UpdateBuilder<InferRow<T>>;
     delete<T extends AnySQLiteTable>(table: T): DeleteBuilder<InferRow<T>>;
 
-    // Count rows in a table
-    count(table: AnySQLiteTable, condition?: { where: string; params: unknown[] }): number;
+    // Transactions
+    transaction<T>(cb: (tx: SqliteNapiAdapter) => T, mode?: string): T;
 
+    // Helpers
+    count(table: AnySQLiteTable, condition?: { where: string; params: unknown[] }): number;
+    pragma(name: string, value?: unknown): any;
+    
     // Raw SQL
     execute(sql: string, params?: unknown[]): QueryResult;
     query<T>(sql: string): PreparedQuery<T>;
 
     // Schema sync
     sync(tables: AnySQLiteTable[]): void;
+
+    // Database state
+    close(): void;
+    isClosed(): boolean;
+    getTables(): string[];
+    getMetadata(): any;
 }
 
 export interface PreparedQuery<T> {
@@ -68,7 +86,7 @@ class SelectBuilder<T> {
     private _offset: number | null = null;
 
     constructor(
-        private db: SqliteNapiDatabase,
+        private db: Queryable,
         private tableName: string
     ) { }
 
@@ -167,11 +185,21 @@ class SelectBuilder<T> {
     }
 
     all(params?: unknown[]): T[] {
-        return this.db.query(this.build()).all(this.getFinalParams(params)) as T[];
+        const sql = this.build();
+        const p = this.getFinalParams(params);
+        
+        if (this.db.query) {
+            return this.db.query(sql).all(p) as T[];
+        } else {
+            throw new Error("SELECT is not yet supported inside Transaction. Use Database directly or raw SQL.");
+        }
     }
 
     get(params?: unknown[]): T | undefined {
-        return this.db.query(this.build()).get(this.getFinalParams(params)) as T | undefined;
+        if (this.db.query) {
+            return this.db.query(this.build()).get(this.getFinalParams(params)) as T | undefined;
+        }
+        throw new Error("SELECT is not yet supported inside Transaction.");
     }
 
     run(params?: unknown[]): QueryResult {
@@ -181,7 +209,7 @@ class SelectBuilder<T> {
 
 class InsertBuilder<T> {
     constructor(
-        private db: SqliteNapiDatabase,
+        private db: Queryable,
         private tableName: string
     ) { }
 
@@ -212,7 +240,7 @@ class InsertBuilder<T> {
 
 class UpdateBuilder<T> {
     constructor(
-        private db: SqliteNapiDatabase,
+        private db: Queryable,
         private tableName: string
     ) { }
 
@@ -258,7 +286,7 @@ class UpdateBuilder<T> {
 
 class DeleteBuilder<T> {
     constructor(
-        private db: SqliteNapiDatabase,
+        private db: Queryable,
         private tableName: string
     ) { }
 
@@ -294,45 +322,57 @@ class DeleteBuilder<T> {
 
 /**
  * Create a Drizzle-compatible adapter for sqlite-napi
- * 
- * @example
- *   import { sqliteNapi } from "./core/drizzle";
- *   import { Database } from "sqlite-napi";
- *   
- *   const db = new Database(":memory:");
- *   const adapter = sqliteNapi(db);
- *   
- *   // Select all users
- *   const users = adapter.select(usersTable).all();
- *   
- *   // Insert a user
- *   adapter.insert(usersTable).values({ name: "Alice", email: "alice@example.com" }).run();
- * */
-export function sqliteNapi(db: SqliteNapiDatabase): SqliteNapiAdapter {
-    return {
+ */
+export function sqliteNapi(db: SqliteNapiDatabase | Transaction): SqliteNapiAdapter {
+    const adapter: SqliteNapiAdapter = {
         select<T extends AnySQLiteTable>(table?: T): SelectBuilder<InferRow<T>> {
-            return new SelectBuilder<InferRow<T>>(db, table ? table.name : "");
+            return new SelectBuilder<InferRow<T>>(db as Queryable, table ? table.name : "");
         },
 
         insert<T extends AnySQLiteTable>(table: T): InsertBuilder<InferRow<T>> {
-            return new InsertBuilder<InferRow<T>>(db, table.name);
+            return new InsertBuilder<InferRow<T>>(db as Queryable, table.name);
         },
 
         update<T extends AnySQLiteTable>(table: T): UpdateBuilder<InferRow<T>> {
-            return new UpdateBuilder<InferRow<T>>(db, table.name);
+            return new UpdateBuilder<InferRow<T>>(db as Queryable, table.name);
         },
 
         delete<T extends AnySQLiteTable>(table: T): DeleteBuilder<InferRow<T>> {
-            return new DeleteBuilder<InferRow<T>>(db, table.name);
+            return new DeleteBuilder<InferRow<T>>(db as Queryable, table.name);
+        },
+
+        transaction<T>(cb: (tx: SqliteNapiAdapter) => T, mode?: string): T {
+            if (!('transaction' in db)) {
+                throw new Error("Nested transactions are only supported via savepoints in raw SQL currently.");
+            }
+            const tx = (db as SqliteNapiDatabase).transaction(mode);
+            try {
+                // Wrap the transaction object in a new adapter
+                const txAdapter = sqliteNapi(tx);
+                const result = cb(txAdapter);
+                tx.commit();
+                return result;
+            } catch (e) {
+                tx.rollback();
+                throw e;
+            }
         },
 
         count(table: AnySQLiteTable, condition?: { where: string; params: unknown[] }): number {
+            if (!('query' in db)) throw new Error("Count requires Database object (query support)");
+            
             let sql = `SELECT COUNT(*) as count FROM ${table.name}`;
             const params: unknown[] = condition?.params ?? [];
             if (condition?.where) {
                 sql += ` WHERE ${condition.where}`;
             }
-            return db.query(sql).get(params)?.count as number ?? 0;
+            const res = (db as SqliteNapiDatabase).query(sql).get(params) as { count: number } | undefined;
+            return res?.count ?? 0;
+        },
+
+        pragma(name: string, value?: unknown): any {
+            if (!('pragma' in db)) throw new Error("Pragma requires Database object");
+            return (db as SqliteNapiDatabase).pragma(name, value);
         },
 
         execute(sql: string, params?: unknown[]): QueryResult {
@@ -340,7 +380,8 @@ export function sqliteNapi(db: SqliteNapiDatabase): SqliteNapiAdapter {
         },
 
         query<T>(sql: string): PreparedQuery<T> {
-            const stmt = db.query(sql);
+            if (!('query' in db)) throw new Error("Query requires Database object");
+            const stmt = (db as SqliteNapiDatabase).query(sql);
             return {
                 all(params?: unknown[]) {
                     return stmt.all(params) as T[];
@@ -356,56 +397,54 @@ export function sqliteNapi(db: SqliteNapiDatabase): SqliteNapiAdapter {
 
         sync(tables: AnySQLiteTable[]): void {
             for (const table of tables) {
-                // 1. Create table if not exists
-                db.createTableIfNotExists(table.getSQL());
+                // 1. Create table and indexes
+                if ('exec' in db) {
+                    (db as SqliteNapiDatabase).exec(table.getSQL());
+                } else {
+                    db.run(table.getSQL());
+                }
 
-                // 2. Check for missing columns and add them
-                for (const col of table.getColumns()) {
-                    // Skip primary keys as they must be created with the table
-                    if (col.primaryKey) continue;
-
-                    db.addColumnIfNotExists(
-                        table.name,
-                        col.name,
-                        col.getDefinitionSQL()
-                    );
+                // 2. Check for missing columns and add them (for migrations)
+                if ('addColumnIfNotExists' in db) {
+                    for (const col of table.getColumns()) {
+                        if (col.isPrimaryKey) continue;
+                        (db as SqliteNapiDatabase).addColumnIfNotExists(table.name, col.name, col.getDefinitionSQL());
+                    }
                 }
             }
         },
+
+        close(): void {
+            if ('close' in db) (db as SqliteNapiDatabase).close();
+        },
+
+        isClosed(): boolean {
+            if ('isClosed' in db) return (db as SqliteNapiDatabase).isClosed();
+            return false;
+        },
+
+        getTables(): string[] {
+            if ('getTables' in db) return (db as SqliteNapiDatabase).getTables();
+            return [];
+        },
+
+        getMetadata(): any {
+            if ('getMetadata' in db) return (db as SqliteNapiDatabase).getMetadata();
+            return {};
+        }
     };
+
+    return adapter;
 }
 
 // ============================================
 // Schema Migration Helper
 // ============================================
 
-/**
- * Generate SQL CREATE TABLE statements from Drizzle tables
- * 
- * @example
- *   import { sqliteNapi, sqliteTable, integer, text } from "./core/drizzle";
- *   
- *   const usersTable = sqliteTable("users", {
- *     id: integer("id").$primaryKey(),
- *     name: text("name"),
- *     email: text("email"),
- *   });
- *   
- *   const sql = getTableSQL(usersTable);
- *   console.log(sql);
- * */
 export function getTableSQL(table: AnySQLiteTable): string {
     return table.getSQL();
 }
 
-/**
- * Generate SQL for all tables in an array
- * 
- * @example
- *   import { getTablesSQL } from "./core/drizzle";
- *   
- *   const sql = getTablesSQL([usersTable, postsTable]);
- * */
 export function getTablesSQL(tables: AnySQLiteTable[]): string {
     return tables.map(t => t.getSQL()).join(";\n\n");
 }

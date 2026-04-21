@@ -14,11 +14,11 @@ export interface ColumnBuilderConfig {
     name: string;
     table?: Table;
     notNull?: boolean;
-    default?: unknown;
     primaryKey?: boolean;
     unique?: boolean;
     references?: { table: string; column: string };
     autoIncrement?: boolean;
+    default?: unknown;
 }
 
 // ============================================
@@ -28,12 +28,12 @@ export interface ColumnBuilderConfig {
 export abstract class Column<T = unknown> {
     readonly name: string;
     readonly table?: Table;
-    readonly notNull: boolean = false;
-    readonly default: T | undefined = undefined;
-    readonly primaryKey: boolean = false;
-    readonly unique: boolean = false;
-    readonly references?: { table: string; column: string };
-    readonly autoIncrement: boolean = false;
+    readonly _notNull: boolean = false;
+    readonly _primaryKey: boolean = false;
+    readonly _unique: boolean = false;
+    readonly _references?: { table: string; column: string };
+    readonly _autoIncrement: boolean = false;
+    readonly _default: T | undefined = undefined;
 
     // Added for type inference
     readonly _type!: T;
@@ -41,15 +41,66 @@ export abstract class Column<T = unknown> {
     constructor(config: ColumnBuilderConfig) {
         this.name = config.name;
         this.table = config.table;
-        this.notNull = config.notNull ?? false;
-        this.default = config.default as T;
-        this.primaryKey = config.primaryKey ?? false;
-        this.unique = config.unique ?? false;
-        this.references = config.references;
-        this.autoIncrement = config.autoIncrement ?? false;
+        this._notNull = config.notNull ?? false;
+        this._primaryKey = config.primaryKey ?? false;
+        this._unique = config.unique ?? false;
+        this._references = config.references;
+        this._autoIncrement = config.autoIncrement ?? false;
+        this._default = config.default as T;
     }
 
+    // Public getters for internal state (renamed to avoid conflict with methods)
+    get isNotNull() { return this._notNull; }
+    get isPrimaryKey() { return this._primaryKey; }
+    get isUnique() { return this._unique; }
+    get isAutoIncrement() { return this._autoIncrement; }
+    get defaultValue() { return this._default; }
+
     abstract getSQLType(): string;
+
+    // Chainable methods
+    primaryKey(): this {
+        const Constructor = this.constructor as new (config: ColumnBuilderConfig) => this;
+        return new Constructor({ ...this.getConfig(), primaryKey: true });
+    }
+
+    notNull(): this {
+        const Constructor = this.constructor as new (config: ColumnBuilderConfig) => this;
+        return new Constructor({ ...this.getConfig(), notNull: true });
+    }
+
+    unique(): this {
+        const Constructor = this.constructor as new (config: ColumnBuilderConfig) => this;
+        return new Constructor({ ...this.getConfig(), unique: true });
+    }
+
+    default(value: T): this {
+        const Constructor = this.constructor as new (config: ColumnBuilderConfig) => this;
+        return new Constructor({ ...this.getConfig(), default: value });
+    }
+
+    references(table: string, column: string): this {
+        const Constructor = this.constructor as new (config: ColumnBuilderConfig) => this;
+        return new Constructor({ ...this.getConfig(), references: { table, column } });
+    }
+
+    autoincrement(): this {
+        const Constructor = this.constructor as new (config: ColumnBuilderConfig) => this;
+        return new Constructor({ ...this.getConfig(), autoIncrement: true });
+    }
+
+    protected getConfig(): ColumnBuilderConfig {
+        return {
+            name: this.name,
+            table: this.table,
+            notNull: this._notNull,
+            primaryKey: this._primaryKey,
+            unique: this._unique,
+            references: this._references,
+            autoIncrement: this._autoIncrement,
+            default: this._default,
+        };
+    }
 
     toString(): string {
         return this.name;
@@ -65,18 +116,18 @@ export abstract class Column<T = unknown> {
     }
 
     getDefinitionSQL(): string {
-        if (this.primaryKey && this.autoIncrement) {
+        if (this._primaryKey && this._autoIncrement) {
             return `INTEGER PRIMARY KEY AUTOINCREMENT`;
         }
 
         let sql = this.getSQLType();
 
-        if (this.primaryKey) sql += " PRIMARY KEY";
-        if (this.notNull && !this.primaryKey) sql += " NOT NULL";
-        if (this.unique && !this.primaryKey) sql += " UNIQUE";
+        if (this._primaryKey) sql += " PRIMARY KEY";
+        if (this._notNull && !this._primaryKey) sql += " NOT NULL";
+        if (this._unique && !this._primaryKey) sql += " UNIQUE";
 
-        if (this.default !== undefined) {
-            const defaultVal = this.default;
+        if (this._default !== undefined) {
+            const defaultVal = this._default;
             if (typeof defaultVal === "string" && (
                 defaultVal.startsWith("(") ||
                 defaultVal.toUpperCase().startsWith("DATETIME") ||
@@ -96,8 +147,8 @@ export abstract class Column<T = unknown> {
             }
         }
 
-        if (this.references) {
-            sql += ` REFERENCES ${this.references.table}(${this.references.column})`;
+        if (this._references) {
+            sql += ` REFERENCES ${this._references.table}(${this._references.column})`;
         }
 
         return sql;
@@ -193,79 +244,45 @@ export const timestamp = (name: string): TextColumn => {
 };
 
 // ============================================
-// Column Modifiers
+// Column Modifiers (for backward compatibility and helper)
 // ============================================
 
-export const primaryKey = (col: IntegerColumn): IntegerColumn => {
-    return new IntegerColumn({
-        name: col.name,
-        table: col.table,
-        notNull: col.notNull,
-        default: col.default,
-        primaryKey: true,
-        unique: col.unique,
-        autoIncrement: true,
-    });
+export const primaryKey = <T extends Column>(col: T): T => {
+    return col.primaryKey();
 };
 
 export const notNull = <T extends Column>(col: T): T => {
-    const newCol = new (Object.getPrototypeOf(col).constructor as new (config: ColumnBuilderConfig) => T)({
-        name: col.name,
-        table: col.table,
-        notNull: true,
-        default: col.default,
-        primaryKey: col.primaryKey,
-        unique: col.unique,
-        references: col.references,
-        autoIncrement: col.autoIncrement,
-    });
-    return newCol;
+    return col.notNull();
 };
 
 export const unique = <T extends Column>(col: T): T => {
-    const newCol = new (Object.getPrototypeOf(col).constructor as new (config: ColumnBuilderConfig) => T)({
-        name: col.name,
-        table: col.table,
-        notNull: col.notNull,
-        default: col.default,
-        primaryKey: col.primaryKey,
-        unique: true,
-        references: col.references,
-        autoIncrement: col.autoIncrement,
-    });
-    return newCol;
+    return col.unique();
 };
 
-export const default_ = <T, V>(col: T, value: V): T => {
-    const newCol = new (Object.getPrototypeOf(col as Column).constructor as new (config: ColumnBuilderConfig) => T)({
-        name: (col as Column).name,
-        table: (col as Column).table,
-        notNull: (col as Column).notNull,
-        default: value,
-        primaryKey: (col as Column).primaryKey,
-        unique: (col as Column).unique,
-        references: (col as Column).references,
-        autoIncrement: (col as Column).autoIncrement,
-    });
-    return newCol;
+export const default_ = <T extends Column, V>(col: T, value: V): T => {
+    return col.default(value as any);
 };
 
 export const references = <T extends Column>(col: T, config: { table: string; column: string }): T => {
-    const newCol = new (Object.getPrototypeOf(col).constructor as new (config: ColumnBuilderConfig) => T)({
-        name: col.name,
-        table: col.table,
-        notNull: col.notNull,
-        default: col.default,
-        primaryKey: col.primaryKey,
-        unique: col.unique,
-        references: config,
-        autoIncrement: col.autoIncrement,
-    });
-    return newCol;
+    return col.references(config.table, config.column);
 };
 
-export const index = (columns: string[], unique?: boolean) => {
-    return { columns, unique };
+// ============================================
+// Index Definitions
+// ============================================
+
+export interface IndexConfig {
+    name: string;
+    columns: string[];
+    unique?: boolean;
+}
+
+export const index = (name: string, columns: string[], unique?: boolean): IndexConfig => {
+    return { name, columns, unique };
+};
+
+export const uniqueIndex = (name: string, columns: string[]): IndexConfig => {
+    return { name, columns, unique: true };
 };
 
 // Type for column definition

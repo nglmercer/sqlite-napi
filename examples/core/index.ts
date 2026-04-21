@@ -21,6 +21,7 @@
  * */
 
 export { sqliteNapi, getTableSQL, getTablesSQL } from "./driver";
+export type { SqliteNapiAdapter, PreparedQuery } from "./driver";
 export { sqliteTable, type SQLiteTable, type InferRow } from "./table";
 export {
     integer,
@@ -38,6 +39,7 @@ export {
     default_,
     references,
     index,
+    uniqueIndex,
 } from "./columns";
 export type {
     AnyColumn,
@@ -45,5 +47,6 @@ export type {
     SQLiteColumn,
     ColumnDef,
     ColumnBuilderConfig,
+    IndexConfig,
 } from "./columns";
 export type { AnySQLiteTable, TableConfig } from "./table";

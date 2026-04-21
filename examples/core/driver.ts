@@ -7,6 +7,7 @@
 
 import { Database as SqliteNapiDatabase, type QueryResult, type Statement, type Transaction } from "../../index";
 import type { AnySQLiteTable, InferRow } from "./table";
+import type { AnyColumn } from "./columns";
 
 // ============================================
 // Query Builder Types
@@ -105,8 +106,8 @@ class SelectBuilder<T extends AnySQLiteTable> {
 
     select<K extends keyof InferRow<T>>(...columns: K[]): SelectBuilder<T> {
         const dbColumns = columns.map(k => {
-            const col = (this.table as any).columnMap[k as string];
-            return col ? col.name : String(k);
+            const col = this.table.columnMap[k as string];
+            return (col as AnyColumn | undefined)?.name || String(k);
         });
         this._columns = dbColumns.join(", ");
         return this;
@@ -142,8 +143,8 @@ class SelectBuilder<T extends AnySQLiteTable> {
     }
 
     orderBy(column: keyof InferRow<T> | string, direction: "asc" | "desc" = "asc"): this {
-        const col = (this.table as any).columnMap[column as string];
-        const dbCol = col ? col.name : String(column);
+        const col = this.table.columnMap[column as string];
+        const dbCol = (col as AnyColumn | undefined)?.name || String(column);
         this._orderBys.push(`${dbCol} ${direction.toUpperCase()}`);
         return this;
     }
@@ -188,12 +189,32 @@ class SelectBuilder<T extends AnySQLiteTable> {
         return [...this._joinParams, ...this._whereParams, ...(extra || [])];
     }
 
+    private mapResult(row: unknown): InferRow<T> {
+        if (!row || typeof row !== "object") return row as InferRow<T>;
+
+        const mapped: Record<string, unknown> = {};
+        const columnMap = this.table.columnMap;
+
+        // Create a reverse map for faster lookup: dbName -> jsKey
+        const reverseMap: Record<string, string> = {};
+        for (const [jsKey, col] of Object.entries(columnMap)) {
+            reverseMap[(col as AnyColumn).name] = jsKey;
+        }
+
+        for (const [dbName, value] of Object.entries(row as Record<string, unknown>)) {
+            const jsKey = reverseMap[dbName] || dbName;
+            mapped[jsKey] = value;
+        }
+        return mapped as InferRow<T>;
+    }
+
     all(params?: unknown[]): InferRow<T>[] {
         const sql = this.build();
         const p = this.getFinalParams(params);
 
         if (this.db.query) {
-            return this.db.query(sql).all(p) as InferRow<T>[];
+            const results = this.db.query(sql).all(p);
+            return results.map((row: unknown) => this.mapResult(row));
         } else {
             throw new Error("SELECT is not yet supported inside Transaction. Use Database directly or raw SQL.");
         }
@@ -201,7 +222,8 @@ class SelectBuilder<T extends AnySQLiteTable> {
 
     get(params?: unknown[]): InferRow<T> | undefined {
         if (this.db.query) {
-            return this.db.query(this.build()).get(this.getFinalParams(params)) as InferRow<T> | undefined;
+            const row = this.db.query(this.build()).get(this.getFinalParams(params));
+            return this.mapResult(row);
         }
         throw new Error("SELECT is not yet supported inside Transaction.");
     }
@@ -234,10 +256,10 @@ class InsertBuilder<T extends AnySQLiteTable> {
         const values: unknown[] = [];
 
         for (const key of keys) {
-            const col = (this.table as any).columnMap[key];
+            const col = this.table.columnMap[key] as AnyColumn | undefined;
             if (col) {
                 dbColumns.push(col.name);
-                values.push((this.rowData as any)[key]);
+                values.push((this.rowData as Record<string, unknown>)[key]);
             } else {
                 // Fallback for raw keys
                 dbColumns.push(key);
@@ -289,10 +311,10 @@ class UpdateBuilder<T extends AnySQLiteTable> {
         const params: unknown[] = [];
 
         for (const key of keys) {
-            const col = (this.table as any).columnMap[key];
+            const col = this.table.columnMap[key] as AnyColumn | undefined;
             const dbCol = col ? col.name : key;
             setClauses.push(`${dbCol} = ?`);
-            params.push((this.updateData as any)[key]);
+            params.push((this.updateData as Record<string, unknown>)[key]);
         }
 
         let sql = `UPDATE ${this.table.name} SET ${setClauses.join(", ")}`;

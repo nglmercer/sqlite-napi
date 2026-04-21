@@ -23,7 +23,7 @@ const usersV2 = sqliteTable("users", {
 
 console.log("\nSyncing V2...");
 adapter.sync([usersV2]);
-console.log("Columns after V2:", db.getColumns("users").map(c => (c as any).name));
+console.log("Columns after V2:", db.getColumns("users").map(c => c.name));
 
 db.close();
 import { unlinkSync } from "fs";

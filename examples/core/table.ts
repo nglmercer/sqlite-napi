@@ -75,7 +75,7 @@ export class Table {
 export type AnySQLiteTable = SQLiteTable<Record<string, Column>>;
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export class SQLiteTable<T extends Record<string, any>> extends Table {
+export class SQLiteTable<T extends Record<string, Column>> extends Table {
     // Store table name in a separate property to avoid conflicts with column names
     readonly tableName: string;
 

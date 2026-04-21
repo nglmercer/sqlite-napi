@@ -72,7 +72,7 @@ export type Episode = InferRow<typeof episodes>;
 // ============================================
 
 class MediaService {
-    private adapter: ReturnType<typeof sqliteNapi>;
+    public adapter: ReturnType<typeof sqliteNapi>;
 
     constructor(db: Database) {
         this.adapter = sqliteNapi(db);
@@ -101,6 +101,18 @@ class MediaService {
         this.adapter.update(table).set({ ranking: newRanking }).where("id = ?", [id]).run();
     }
 
+    /**
+     * Automatically recalculate ranking based on views and rating
+     * Formula: (views + 1) * rating
+     */
+    recalculateRanking(type: 'media' | 'season' | 'episode', id: number) {
+        const table = type === 'media' ? media : type === 'season' ? seasons : episodes;
+        this.adapter.execute(
+            `UPDATE ${table.name} SET ranking = CAST((views + 1) * rating AS INTEGER) WHERE id = ?`,
+            [id]
+        );
+    }
+
     // --- Aggregation Queries ---
 
     /**
@@ -123,23 +135,23 @@ class MediaService {
 
     // --- Top Ranking Queries ---
 
-    getTopMedia(limit: number = 10) {
+    getTopMedia(limit: number = 10, by: 'ranking' | 'rating' = 'ranking') {
         return this.adapter.select(media)
-            .orderBy("ranking", "desc")
+            .orderBy(by, "desc")
             .limit(limit)
             .all();
     }
 
-    getTopSeasons(limit: number = 10) {
+    getTopSeasons(limit: number = 10, by: 'ranking' | 'rating' = 'ranking') {
         return this.adapter.select(seasons)
-            .orderBy("ranking", "desc")
+            .orderBy(by, "desc")
             .limit(limit)
             .all();
     }
 
-    getTopEpisodes(limit: number = 10) {
+    getTopEpisodes(limit: number = 10, by: 'ranking' | 'rating' = 'ranking') {
         return this.adapter.select(episodes)
-            .orderBy("ranking", "desc")
+            .orderBy(by, "desc")
             .limit(limit)
             .all();
     }
@@ -197,41 +209,49 @@ async function main() {
     const db = new Database(":memory:");
     const service = new MediaService(db);
 
-    console.log("1. Creating Series 'The NAPI Chronicles'...");
-    const seriesId = service.createSeries("The NAPI Chronicles", 2, 5);
-    console.log(`   ✓ Created with ID: ${seriesId}\n`);
+    console.log("1. Creating Media Library...");
+    service.createSeries("The NAPI Chronicles", 2, 5);
+    service.createSeries("SQLite Adventures", 1, 3);
+    service.createSeries("Binary Dreams", 3, 4);
+    service.createSeries("Node.js Knight", 2, 8);
+    service.createSeries("Async Assassin", 1, 10);
+    service.createSeries("Buffer Boy", 4, 2);
+    service.createSeries("Stream Samurai", 2, 6);
+    service.createSeries("Promise Paladin", 1, 12);
+    service.createSeries("Event Loop Hero", 3, 5);
+    service.createSeries("Micro-benchmark Mage", 2, 4);
+    service.createSeries("Native Nuisance", 1, 3);
+    console.log(`   ✓ Library created with 11 series.\n`);
 
     console.log("2. Simulating User Activity...");
-    // Increment views for the series
-    service.incrementViews('media', seriesId);
-
-    // Update ratings (validated 1-10)
-    service.updateRating('media', seriesId, 12); // Will be clamped to 10
-    service.updateRanking('media', seriesId, 100);
-
-    // Update seasons with different ratings to check average
-    service.updateRating('season', 1, 8);
-    service.updateRating('season', 2, 9);
-
-    // Update some episodes
-    service.updateRating('episode', 1, 5.0);
-    service.updateRanking('episode', 1, 500); // Top episode
-    service.updateRanking('episode', 2, 450);
+    // Update some media with random ratings and views
+    const allMedia = service.adapter.select(media).all();
+    allMedia.forEach((m, i) => {
+        const r = 5 + Math.random() * 5;
+        service.updateRating('media', m.id, r);
+        for (let v = 0; v < (i * 10); v++) service.incrementViews('media', m.id);
+        service.recalculateRanking('media', m.id);
+    });
 
     console.log("   ✓ Metrics updated.\n");
 
-    console.log("3. Querying Top Content...");
-    const topMedia = service.getTopMedia(1);
-    console.log("   Top Media:", topMedia.map(m => `[Rank ${m.ranking}] ${m.title} (${m.views} views, Rating ${m.rating})`));
+    console.log("3. Querying Insights...");
 
-    const avgRating = service.getAverageMediaRating(seriesId);
-    console.log(`   Average Rating across all seasons: ${avgRating.toFixed(2)} / 10`);
+    console.log("\n\x1b[32m--- TOP 10 BY RANKING (Popularity) ---\x1b[0m");
+    const topRanking = service.getTopMedia(10, 'ranking');
+    topRanking.forEach((m, i) => {
+        console.log(`   ${i + 1}. [Rank ${m.ranking.toString().padStart(3)}] ${m.title.padEnd(25)} (${m.views} views, ${m.rating.toFixed(1)} rating)`);
+    });
 
-    const topEpisodes = service.getTopEpisodes(3);
-    console.log("   Top Episodes:", topEpisodes.map(e => `[Rank ${e.ranking}] ${e.title}`));
+    console.log("\n\x1b[32m--- TOP 10 BY RATING (Quality) ---\x1b[0m");
+    const topRating = service.getTopMedia(10, 'rating');
+    topRating.forEach((m, i) => {
+        console.log(`   ${i + 1}. [Rate ${m.rating.toFixed(2)}] ${m.title.padEnd(25)} (${m.ranking} ranking score)`);
+    });
 
     console.log("\n4. Deep Retrieval...");
-    const fullData = service.getMediaWithStats(seriesId);
+    const firstMediaId = allMedia[0].id;
+    const fullData = service.getMediaWithStats(firstMediaId);
     console.log(`   Series: ${fullData?.title}`);
     console.log(`   Seasons: ${fullData?.seasons.length}`);
     fullData?.seasons.forEach(s => {

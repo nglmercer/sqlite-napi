@@ -1,6 +1,6 @@
 {
   "name": "sqlite-napi",
-  "version": "1.0.1",
+  "version": "1.2.0",
   "description": "High-performance SQLite library for Node.js and Bun that mirrors the bun:sqlite API",
   "keywords": [
     "sqlite",
@@ -67,7 +67,7 @@
     "binaryName": "sqlite-napi",
     "targets": [
       "x86_64-pc-windows-msvc",
-      "i686-pc-windows-msvc",
+      "aarch64-pc-windows-msvc",
       "x86_64-apple-darwin",
       "aarch64-apple-darwin",
       "x86_64-unknown-linux-gnu",

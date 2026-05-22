@@ -45,6 +45,7 @@
     "build:debug": "napi build --platform",
     "clean": "napi clean && cargo clean",
     "test": "bun test",
+    "bench": "bun run benchmarks/all.ts",
     "dev": "bun run --watch examples/dev.ts",
     "type-check": "tsc --noEmit",
     "format": "bun run --filter ./examples --filter ./scripts format",

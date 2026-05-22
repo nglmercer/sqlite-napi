@@ -1,6 +1,20 @@
 import { expect, test, describe, beforeEach } from "bun:test";
 import { Database } from "../index";
 
+interface BigNumberRow {
+  id: number;
+  big_val: number | bigint;
+  name: string;
+}
+
+interface DoubledRow {
+  doubled: number | bigint;
+}
+
+interface TotalRow {
+  total: number | bigint;
+}
+
 describe("SQLite NAPI - BigInt Support", () => {
   let db: Database;
 
@@ -13,7 +27,7 @@ describe("SQLite NAPI - BigInt Support", () => {
 
   describe("BigInt parameter binding", () => {
     test("inserts BigInt value", () => {
-      const bigValue = BigInt("9007199254740992"); // MAX_SAFE_INTEGER + 1
+      const bigValue = BigInt("9007199254740992");
 
       db.run("INSERT INTO big_numbers (big_val, name) VALUES (?, ?)", [
         bigValue,
@@ -21,16 +35,14 @@ describe("SQLite NAPI - BigInt Support", () => {
       ]);
 
       const stmt = db.query("SELECT * FROM big_numbers WHERE name = ?");
-      const row = stmt.get(["test1"]);
+      const row = stmt.get(["test1"]) as BigNumberRow | undefined;
 
       expect(row).toBeDefined();
-      // BigInt values may be returned as BigInt or number depending on implementation
-      const returnedValue = (row as any).big_val;
-      expect(returnedValue).toBeDefined();
+      expect(row!.big_val).toBeDefined();
     });
 
     test("inserts large BigInt value", () => {
-      const bigValue = BigInt("9223372036854775807"); // Max signed 64-bit integer
+      const bigValue = BigInt("9223372036854775807");
 
       db.run("INSERT INTO big_numbers (big_val, name) VALUES (?, ?)", [
         bigValue,
@@ -38,16 +50,14 @@ describe("SQLite NAPI - BigInt Support", () => {
       ]);
 
       const stmt = db.query("SELECT * FROM big_numbers WHERE name = ?");
-      const row = stmt.get(["max_int64"]);
+      const row = stmt.get(["max_int64"]) as BigNumberRow | undefined;
 
       expect(row).toBeDefined();
-      // Large BigInt values may lose precision when converted to Number
-      const returnedValue = (row as any).big_val;
-      expect(returnedValue).toBeDefined();
+      expect(row!.big_val).toBeDefined();
     });
 
     test("inserts negative BigInt value", () => {
-      const bigValue = BigInt("-9223372036854775808"); // Min signed 64-bit integer
+      const bigValue = BigInt("-9223372036854775808");
 
       db.run("INSERT INTO big_numbers (big_val, name) VALUES (?, ?)", [
         bigValue,
@@ -55,25 +65,22 @@ describe("SQLite NAPI - BigInt Support", () => {
       ]);
 
       const stmt = db.query("SELECT * FROM big_numbers WHERE name = ?");
-      const row = stmt.get(["min_int64"]);
+      const row = stmt.get(["min_int64"]) as BigNumberRow | undefined;
 
       expect(row).toBeDefined();
-      const returnedValue = (row as any).big_val;
-      expect(returnedValue).toBeDefined();
+      expect(row!.big_val).toBeDefined();
     });
 
     test("inserts BigInt zero", () => {
-      const bigValue = BigInt(0);
-
       db.run("INSERT INTO big_numbers (big_val, name) VALUES (?, ?)", [
-        bigValue,
+        BigInt(0),
         "zero",
       ]);
 
       const stmt = db.query("SELECT * FROM big_numbers WHERE name = ?");
-      const row = stmt.get(["zero"]);
+      const row = stmt.get(["zero"]) as BigNumberRow | undefined;
 
-      expect((row as any).big_val).toBe(0);
+      expect(row!.big_val).toBe(0);
     });
   });
 
@@ -89,9 +96,9 @@ describe("SQLite NAPI - BigInt Support", () => {
       ]);
 
       const stmt = db.query("SELECT * FROM big_numbers WHERE big_val = ?");
-      const row = stmt.get([BigInt("9007199254740992")]);
+      const row = stmt.get([BigInt("9007199254740992")]) as BigNumberRow | undefined;
 
-      expect((row as any).name).toBe("big1");
+      expect(row!.name).toBe("big1");
     });
 
     test("queries with BigInt comparison", () => {
@@ -105,7 +112,7 @@ describe("SQLite NAPI - BigInt Support", () => {
       ]);
 
       const stmt = db.query("SELECT * FROM big_numbers WHERE big_val > ?");
-      const rows = stmt.all([BigInt("500000000000")]);
+      const rows = stmt.all([BigInt("500000000000")]) as BigNumberRow[];
 
       expect(rows.length).toBe(2);
     });
@@ -119,10 +126,10 @@ describe("SQLite NAPI - BigInt Support", () => {
       ]);
 
       const stmt = db.query("SELECT * FROM big_numbers");
-      const rows = stmt.all();
+      const rows = stmt.all() as BigNumberRow[];
 
       expect(rows.length).toBe(1);
-      expect((rows as any[])[0].big_val).toBe(123456789012345);
+      expect(rows[0].big_val).toBe(123456789012345);
     });
 
     test("BigInt with statement.get()", () => {
@@ -132,9 +139,9 @@ describe("SQLite NAPI - BigInt Support", () => {
       ]);
 
       const stmt = db.query("SELECT * FROM big_numbers WHERE name = ?");
-      const row = stmt.get(["test"]);
+      const row = stmt.get(["test"]) as BigNumberRow | undefined;
 
-      expect((row as any).big_val).toBe(987654321098765);
+      expect(row!.big_val).toBe(987654321098765);
     });
 
     test("BigInt with statement.values()", () => {
@@ -144,10 +151,10 @@ describe("SQLite NAPI - BigInt Support", () => {
       ]);
 
       const stmt = db.query("SELECT big_val, name FROM big_numbers");
-      const values = stmt.values();
+      const values = stmt.values() as unknown[][];
 
       expect(values.length).toBe(1);
-      expect((values as any[])[0][0]).toBe(111111111111111);
+      expect(values[0][0]).toBe(111111111111111);
     });
 
     test("BigInt with statement.run()", () => {
@@ -168,9 +175,9 @@ describe("SQLite NAPI - BigInt Support", () => {
       ]);
 
       const stmt = db.query("SELECT * FROM big_numbers WHERE name = ?");
-      const row = stmt.get(["safe"]);
+      const row = stmt.get(["safe"]) as BigNumberRow | undefined;
 
-      expect((row as any).big_val).toBe(Number.MAX_SAFE_INTEGER);
+      expect(row!.big_val).toBe(Number.MAX_SAFE_INTEGER);
     });
 
     test("handles BigInt larger than MAX_SAFE_INTEGER", () => {
@@ -182,9 +189,8 @@ describe("SQLite NAPI - BigInt Support", () => {
       ]);
 
       const stmt = db.query("SELECT * FROM big_numbers WHERE name = ?");
-      const row = stmt.get(["unsafe"]);
+      const row = stmt.get(["unsafe"]) as BigNumberRow | undefined;
 
-      // Note: JavaScript may lose precision for values > MAX_SAFE_INTEGER
       expect(row).toBeDefined();
     });
 
@@ -197,9 +203,9 @@ describe("SQLite NAPI - BigInt Support", () => {
       const stmt = db.query(
         "SELECT big_val * 2 as doubled FROM big_numbers WHERE name = ?"
       );
-      const row = stmt.get(["base"]);
+      const row = stmt.get(["base"]) as DoubledRow | undefined;
 
-      expect((row as any).doubled).toBe(2000000000000);
+      expect(row!.doubled).toBe(2000000000000);
     });
 
     test("BigInt in aggregation functions", () => {
@@ -213,9 +219,9 @@ describe("SQLite NAPI - BigInt Support", () => {
       ]);
 
       const stmt = db.query("SELECT SUM(big_val) as total FROM big_numbers");
-      const row = stmt.get();
+      const row = stmt.get() as TotalRow | undefined;
 
-      expect((row as any).total).toBe(3000000000000);
+      expect(row!.total).toBe(3000000000000);
     });
   });
 
@@ -227,9 +233,9 @@ describe("SQLite NAPI - BigInt Support", () => {
       });
 
       const stmt = db.query("SELECT * FROM big_numbers WHERE name = $name");
-      const row = stmt.get({ $name: "named" });
+      const row = stmt.get({ $name: "named" }) as BigNumberRow | undefined;
 
-      expect((row as any).big_val).toBe(555555555555555);
+      expect(row!.big_val).toBe(555555555555555);
     });
   });
 
@@ -243,8 +249,8 @@ describe("SQLite NAPI - BigInt Support", () => {
       const stmt = db.query("SELECT big_val, name FROM big_numbers");
       const iter = stmt.iter([]);
 
-      const row = iter.next();
-      expect((row as any).big_val).toBe(777777777777777);
+      const row = iter.next() as BigNumberRow | undefined;
+      expect(row!.big_val).toBe(777777777777777);
     });
   });
 
@@ -261,9 +267,9 @@ describe("SQLite NAPI - BigInt Support", () => {
       db2.deserializeBinary(buffer);
 
       const stmt = db2.query("SELECT * FROM big_numbers WHERE name = ?");
-      const row = stmt.get(["serialize_test"]);
+      const row = stmt.get(["serialize_test"]) as BigNumberRow | undefined;
 
-      expect((row as any).big_val).toBe(888888888888888);
+      expect(row!.big_val).toBe(888888888888888);
 
       db2.close();
     });

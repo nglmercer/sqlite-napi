@@ -1,6 +1,12 @@
 import { expect, test, describe, beforeEach } from "bun:test";
 import { Database } from "../index";
 
+interface UserRow {
+  id: number;
+  name: string;
+  age: number;
+}
+
 describe("SQLite NAPI - Iterator Support", () => {
   let db: Database;
 
@@ -43,8 +49,8 @@ describe("SQLite NAPI - Iterator Support", () => {
 
       expect(row).toBeDefined();
       expect(row).not.toBeNull();
-      expect((row as any).name).toBe("Alice");
-      expect((row as any).age).toBe(30);
+      expect((row as UserRow).name).toBe("Alice");
+      expect((row as UserRow).age).toBe(30);
     });
 
     test("returns subsequent rows on each call", () => {
@@ -52,16 +58,16 @@ describe("SQLite NAPI - Iterator Support", () => {
       const iter = stmt.iter([]);
 
       const row1 = iter.next();
-      expect((row1 as any).name).toBe("Alice");
+      expect((row1 as UserRow).name).toBe("Alice");
 
       const row2 = iter.next();
-      expect((row2 as any).name).toBe("Bob");
+      expect((row2 as UserRow).name).toBe("Bob");
 
       const row3 = iter.next();
-      expect((row3 as any).name).toBe("Charlie");
+      expect((row3 as UserRow).name).toBe("Charlie");
 
       const row4 = iter.next();
-      expect((row4 as any).name).toBe("Diana");
+      expect((row4 as UserRow).name).toBe("Diana");
     });
 
     test("returns null when no more rows", () => {
@@ -157,9 +163,9 @@ describe("SQLite NAPI - Iterator Support", () => {
 
       expect(Array.isArray(remaining)).toBe(true);
       expect(remaining.length).toBe(3);
-      expect((remaining as any[])[0].name).toBe("Bob");
-      expect((remaining as any[])[1].name).toBe("Charlie");
-      expect((remaining as any[])[2].name).toBe("Diana");
+      expect((remaining as UserRow[])[0].name).toBe("Bob");
+      expect((remaining as UserRow[])[1].name).toBe("Charlie");
+      expect((remaining as UserRow[])[2].name).toBe("Diana");
     });
 
     test("returns empty array when no rows remain", () => {
@@ -196,7 +202,7 @@ describe("SQLite NAPI - Iterator Support", () => {
       expect(iter.hasMore()).toBe(true);
 
       const row = iter.next();
-      expect((row as any).name).toBe("Alice"); // Back to first row
+      expect((row as UserRow).name).toBe("Alice"); // Back to first row
     });
 
     test("allows re-iterating after reset", () => {
@@ -206,13 +212,13 @@ describe("SQLite NAPI - Iterator Support", () => {
       // First iteration
       const row1 = iter.next();
       const row2 = iter.next();
-      expect((row1 as any).name).toBe("Alice");
-      expect((row2 as any).name).toBe("Bob");
+      expect((row1 as UserRow).name).toBe("Alice");
+      expect((row2 as UserRow).name).toBe("Bob");
 
       // Reset and iterate again
       iter.reset();
       const row1Again = iter.next();
-      expect((row1Again as any).name).toBe("Alice");
+      expect((row1Again as UserRow).name).toBe("Alice");
     });
 
     test("reset works after iter.all()", () => {
@@ -226,7 +232,7 @@ describe("SQLite NAPI - Iterator Support", () => {
       expect(iter.hasMore()).toBe(true);
 
       const row = iter.next();
-      expect((row as any).name).toBe("Alice");
+      expect((row as UserRow).name).toBe("Alice");
     });
   });
 
@@ -237,8 +243,8 @@ describe("SQLite NAPI - Iterator Support", () => {
 
       const rows = iter.all();
       expect(rows.length).toBe(2);
-      expect((rows as any[])[0].name).toBe("Alice");
-      expect((rows as any[])[1].name).toBe("Charlie");
+      expect((rows as UserRow[])[0].name).toBe("Alice");
+      expect((rows as UserRow[])[1].name).toBe("Charlie");
     });
 
     test("iterator works with multiple parameters", () => {
@@ -279,7 +285,7 @@ describe("SQLite NAPI - Iterator Support", () => {
       while (iter.hasMore()) {
         const row = iter.next();
         if (row) {
-          names.push((row as any).name);
+          names.push((row as UserRow).name);
         }
       }
 

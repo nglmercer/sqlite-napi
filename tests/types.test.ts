@@ -1,6 +1,15 @@
 import { expect, test, describe, beforeEach } from "bun:test";
 import { Database } from "../index";
 
+interface TypesRow {
+  id: number;
+  int_val: number;
+  float_val: number;
+  text_val: string;
+  null_val: null;
+  blob_val: string | null;
+}
+
 describe("SQLite NAPI - Data Types", () => {
   let db: Database;
 
@@ -13,14 +22,14 @@ describe("SQLite NAPI - Data Types", () => {
     db.run("INSERT INTO types_test (int_val) VALUES (?)", [42]);
     const stmt = db.query("SELECT int_val FROM types_test");
     const row = stmt.get([]);
-    expect((row as any).int_val).toBe(42);
+    expect((row as TypesRow).int_val).toBe(42);
   });
 
   test("handles negative INTEGER type", () => {
     db.run("INSERT INTO types_test (int_val) VALUES (?)", [-12345]);
     const stmt = db.query("SELECT int_val FROM types_test");
     const row = stmt.get([]);
-    expect((row as any).int_val).toBe(-12345);
+    expect((row as TypesRow).int_val).toBe(-12345);
   });
 
   test("handles large INTEGER type", () => {
@@ -28,70 +37,70 @@ describe("SQLite NAPI - Data Types", () => {
     db.run("INSERT INTO types_test (int_val) VALUES (?)", [largeInt]);
     const stmt = db.query("SELECT int_val FROM types_test");
     const row = stmt.get([]);
-    expect((row as any).int_val).toBe(largeInt);
+    expect((row as TypesRow).int_val).toBe(largeInt);
   });
 
   test("handles REAL/float type", () => {
     db.run("INSERT INTO types_test (float_val) VALUES (?)", [3.14159]);
     const stmt = db.query("SELECT float_val FROM types_test");
     const row = stmt.get([]);
-    expect((row as any).float_val).toBeCloseTo(3.14159);
+    expect((row as TypesRow).float_val).toBeCloseTo(3.14159);
   });
 
   test("handles REAL with negative value", () => {
     db.run("INSERT INTO types_test (float_val) VALUES (?)", [-2.71828]);
     const stmt = db.query("SELECT float_val FROM types_test");
     const row = stmt.get([]);
-    expect((row as any).float_val).toBeCloseTo(-2.71828);
+    expect((row as TypesRow).float_val).toBeCloseTo(-2.71828);
   });
 
   test("handles REAL with very small value", () => {
     db.run("INSERT INTO types_test (float_val) VALUES (?)", [0.000001]);
     const stmt = db.query("SELECT float_val FROM types_test");
     const row = stmt.get([]);
-    expect((row as any).float_val).toBeCloseTo(0.000001);
+    expect((row as TypesRow).float_val).toBeCloseTo(0.000001);
   });
 
   test("handles TEXT type", () => {
     db.run("INSERT INTO types_test (text_val) VALUES (?)", ["Hello, World!"]);
     const stmt = db.query("SELECT text_val FROM types_test");
     const row = stmt.get([]);
-    expect((row as any).text_val).toBe("Hello, World!");
+    expect((row as TypesRow).text_val).toBe("Hello, World!");
   });
 
   test("handles TEXT with unicode", () => {
     db.run("INSERT INTO types_test (text_val) VALUES (?)", ["Hello 世界 🌍"]);
     const stmt = db.query("SELECT text_val FROM types_test");
     const row = stmt.get([]);
-    expect((row as any).text_val).toBe("Hello 世界 🌍");
+    expect((row as TypesRow).text_val).toBe("Hello 世界 🌍");
   });
 
   test("handles TEXT with empty string", () => {
     db.run("INSERT INTO types_test (text_val) VALUES (?)", [""]);
     const stmt = db.query("SELECT text_val FROM types_test");
     const row = stmt.get([]);
-    expect((row as any).text_val).toBe("");
+    expect((row as TypesRow).text_val).toBe("");
   });
 
   test("handles NULL type", () => {
     db.run("INSERT INTO types_test (null_val) VALUES (?)", [null]);
     const stmt = db.query("SELECT null_val FROM types_test");
     const row = stmt.get([]);
-    expect((row as any).null_val).toBeNull();
+    expect((row as TypesRow).null_val).toBeNull();
   });
 
   test("handles boolean true as integer", () => {
     db.run("INSERT INTO types_test (int_val) VALUES (?)", [true]);
     const stmt = db.query("SELECT int_val FROM types_test");
     const row = stmt.get([]);
-    expect((row as any).int_val).toBe(1);
+    expect((row as TypesRow).int_val).toBe(1);
   });
 
   test("handles boolean false as integer", () => {
     db.run("INSERT INTO types_test (int_val) VALUES (?)", [false]);
     const stmt = db.query("SELECT int_val FROM types_test");
     const row = stmt.get([]);
-    expect((row as any).int_val).toBe(0);
+    expect((row as TypesRow).int_val).toBe(0);
   });
 
   test("handles multiple columns with different types", () => {
@@ -102,10 +111,10 @@ describe("SQLite NAPI - Data Types", () => {
     const stmt = db.query("SELECT int_val, float_val, text_val, null_val FROM types_test");
     const row = stmt.get([]);
     
-    expect((row as any).int_val).toBe(42);
-    expect((row as any).float_val).toBeCloseTo(3.14);
-    expect((row as any).text_val).toBe("test");
-    expect((row as any).null_val).toBeNull();
+    expect((row as TypesRow).int_val).toBe(42);
+    expect((row as TypesRow).float_val).toBeCloseTo(3.14);
+    expect((row as TypesRow).text_val).toBe("test");
+    expect((row as TypesRow).null_val).toBeNull();
   });
 
   test("Statement.values returns rows as arrays", () => {

@@ -1,6 +1,16 @@
 import { expect, test, describe, beforeEach } from "bun:test";
 import { Database } from "../index";
 
+interface UserRow {
+  id: number;
+  name: string;
+  bio: string;
+}
+
+interface CountRow {
+  count: number;
+}
+
 describe("SQLite NAPI - Statement Class", () => {
   let db: Database;
 
@@ -28,8 +38,8 @@ describe("SQLite NAPI - Statement Class", () => {
     expect(rows.length).toBe(1);
     expect(rows[0]).toHaveProperty("name");
     expect(rows[0]).toHaveProperty("bio");
-    expect((rows[0] as any).name).toBe("Alice");
-    expect((rows[0] as any).bio).toBe("Loves Rust");
+    expect((rows[0] as UserRow).name).toBe("Alice");
+    expect((rows[0] as UserRow).bio).toBe("Loves Rust");
   });
 
   test("Statement.all with multiple results", () => {
@@ -37,9 +47,9 @@ describe("SQLite NAPI - Statement Class", () => {
     const rows = stmt.all([]);
     
     expect(rows.length).toBe(3);
-    expect((rows[0] as any).name).toBe("Alice");
-    expect((rows[1] as any).name).toBe("Bob");
-    expect((rows[2] as any).name).toBe("Charlie");
+    expect((rows[0] as UserRow).name).toBe("Alice");
+    expect((rows[1] as UserRow).name).toBe("Bob");
+    expect((rows[2] as UserRow).name).toBe("Charlie");
   });
 
   test("Statement.get returns single row", () => {
@@ -48,7 +58,7 @@ describe("SQLite NAPI - Statement Class", () => {
     
     expect(row).toBeDefined();
     expect(row).not.toBeNull();
-    expect((row as any).name).toBe("Alice");
+    expect((row as UserRow).name).toBe("Alice");
   });
 
   test("Statement.get returns null for no match", () => {
@@ -62,7 +72,7 @@ describe("SQLite NAPI - Statement Class", () => {
     const stmt = db.query("SELECT * FROM users ORDER BY name");
     const row = stmt.get([]);
     
-    expect((row as any).name).toBe("Alice");
+    expect((row as UserRow).name).toBe("Alice");
   });
 
   test("Statement.run executes INSERT", () => {
@@ -100,7 +110,7 @@ describe("SQLite NAPI - Statement Class", () => {
     // Verify deletion
     const countStmt = db.query("SELECT COUNT(*) as count FROM users");
     const countRow = countStmt.get([]);
-    expect((countRow as any).count).toBe(2);
+    expect((countRow as CountRow).count).toBe(2);
   });
 
   test("Statement.run executes DELETE with no matches", () => {
@@ -113,7 +123,7 @@ describe("SQLite NAPI - Statement Class", () => {
     // Verify no deletion
     const countStmt = db.query("SELECT COUNT(*) as count FROM users");
     const countRow = countStmt.get([]);
-    expect((countRow as any).count).toBe(3);
+    expect((countRow as CountRow).count).toBe(3);
   });
 
   test("Statement can be reused multiple times", () => {
@@ -125,6 +135,6 @@ describe("SQLite NAPI - Statement Class", () => {
     
     const countStmt = db.query("SELECT COUNT(*) as count FROM users");
     const countRow = countStmt.get([]);
-    expect((countRow as any).count).toBe(6);
+    expect((countRow as CountRow).count).toBe(6);
   });
 });

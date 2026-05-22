@@ -1,6 +1,24 @@
 import { expect, test, describe, beforeEach } from "bun:test";
 import { Database } from "../index";
 
+interface UserRow {
+  id: number;
+  name: string;
+  age: number | null;
+  email: string;
+}
+
+interface FlagRow {
+  id: number;
+  active: number;
+  disabled: number;
+}
+
+interface ProductRow {
+  id: number;
+  price: number;
+}
+
 describe("SQLite NAPI - Parameter Binding", () => {
   let db: Database;
 
@@ -19,7 +37,7 @@ describe("SQLite NAPI - Parameter Binding", () => {
       const row = stmt.get(["Alice"]);
 
       expect(row).toBeDefined();
-      expect((row as any).name).toBe("Alice");
+      expect((row as UserRow).name).toBe("Alice");
     });
 
     test("multiple positional parameters", () => {
@@ -35,9 +53,9 @@ describe("SQLite NAPI - Parameter Binding", () => {
       const row = stmt.get(["Alice", 30, "alice@example.com"]);
 
       expect(row).toBeDefined();
-      expect((row as any).name).toBe("Alice");
-      expect((row as any).age).toBe(30);
-      expect((row as any).email).toBe("alice@example.com");
+      expect((row as UserRow).name).toBe("Alice");
+      expect((row as UserRow).age).toBe(30);
+      expect((row as UserRow).email).toBe("alice@example.com");
     });
 
     test("positional parameters with statement.run", () => {
@@ -65,7 +83,7 @@ describe("SQLite NAPI - Parameter Binding", () => {
       const values = stmt.values(["Alice"]);
 
       expect(values.length).toBe(1);
-      expect((values as any[])[0]).toEqual(["Alice", 30]);
+      expect((values as unknown[][])[0]).toEqual(["Alice", 30]);
     });
   });
 
@@ -77,8 +95,8 @@ describe("SQLite NAPI - Parameter Binding", () => {
       const row = stmt.get(["Alice", 30]);
 
       expect(row).toBeDefined();
-      expect((row as any).name).toBe("Alice");
-      expect((row as any).age).toBe(30);
+      expect((row as UserRow).name).toBe("Alice");
+      expect((row as UserRow).age).toBe(30);
     });
 
     test("numbered parameters can be reused", () => {
@@ -107,7 +125,7 @@ describe("SQLite NAPI - Parameter Binding", () => {
       const row = stmt.get(["Alice"]);
 
       expect(row).toBeDefined();
-      expect((row as any).name).toBe("Alice");
+      expect((row as UserRow).name).toBe("Alice");
     });
   });
 
@@ -121,8 +139,8 @@ describe("SQLite NAPI - Parameter Binding", () => {
       const row = stmt.get(["Alice", 30]);
 
       expect(row).toBeDefined();
-      expect((row as any).name).toBe("Alice");
-      expect((row as any).age).toBe(30);
+      expect((row as UserRow).name).toBe("Alice");
+      expect((row as UserRow).age).toBe(30);
     });
 
     test("named parameters with statement.run", () => {
@@ -150,7 +168,7 @@ describe("SQLite NAPI - Parameter Binding", () => {
       const stmt = db.query("SELECT * FROM users WHERE name = ?");
       const row = stmt.get(["Alice"]);
 
-      expect((row as any).name).toBe("Alice");
+      expect((row as UserRow).name).toBe("Alice");
     });
   });
 
@@ -164,8 +182,8 @@ describe("SQLite NAPI - Parameter Binding", () => {
       const row = stmt.get(["Charlie", 35]);
 
       expect(row).toBeDefined();
-      expect((row as any).name).toBe("Charlie");
-      expect((row as any).age).toBe(35);
+      expect((row as UserRow).name).toBe("Charlie");
+      expect((row as UserRow).age).toBe(35);
     });
 
     test("mixed :name parameters in query", () => {
@@ -177,7 +195,7 @@ describe("SQLite NAPI - Parameter Binding", () => {
       const stmt = db.query("SELECT * FROM users WHERE name = ?");
       const row = stmt.get(["Diana"]);
 
-      expect((row as any).name).toBe("Diana");
+      expect((row as UserRow).name).toBe("Diana");
     });
   });
 
@@ -191,8 +209,8 @@ describe("SQLite NAPI - Parameter Binding", () => {
       const row = stmt.get(["Eve", 28]);
 
       expect(row).toBeDefined();
-      expect((row as any).name).toBe("Eve");
-      expect((row as any).age).toBe(28);
+      expect((row as UserRow).name).toBe("Eve");
+      expect((row as UserRow).age).toBe(28);
     });
 
     test("@name parameters in WHERE clause", () => {
@@ -201,7 +219,7 @@ describe("SQLite NAPI - Parameter Binding", () => {
       const stmt = db.query("SELECT * FROM users WHERE name = ?");
       const row = stmt.get(["Frank"]);
 
-      expect((row as any).name).toBe("Frank");
+      expect((row as UserRow).name).toBe("Frank");
     });
   });
 
@@ -214,7 +232,7 @@ describe("SQLite NAPI - Parameter Binding", () => {
       const stmt = db.query("SELECT * FROM users WHERE name = $name");
       const row = stmt.get({ $name: "Test" });
 
-      expect((row as any).name).toBe("Test");
+      expect((row as UserRow).name).toBe("Test");
     });
   });
 
@@ -225,7 +243,7 @@ describe("SQLite NAPI - Parameter Binding", () => {
       const stmt = db.query("SELECT * FROM users WHERE name = ?");
       const row = stmt.get(["Alice"]);
 
-      expect((row as any).age).toBeNull();
+      expect((row as UserRow).age).toBeNull();
     });
 
     test("boolean parameter (converted to integer)", () => {
@@ -237,8 +255,8 @@ describe("SQLite NAPI - Parameter Binding", () => {
       const stmt = db.query("SELECT * FROM flags");
       const row = stmt.get();
 
-      expect((row as any).active).toBe(1);
-      expect((row as any).disabled).toBe(0);
+      expect((row as FlagRow).active).toBe(1);
+      expect((row as FlagRow).disabled).toBe(0);
     });
 
     test("float parameter", () => {
@@ -248,7 +266,7 @@ describe("SQLite NAPI - Parameter Binding", () => {
       const stmt = db.query("SELECT * FROM products");
       const row = stmt.get();
 
-      expect((row as any).price).toBeCloseTo(19.99);
+      expect((row as ProductRow).price).toBeCloseTo(19.99);
     });
 
     test("empty string parameter", () => {
@@ -257,7 +275,7 @@ describe("SQLite NAPI - Parameter Binding", () => {
       const stmt = db.query("SELECT * FROM users WHERE name = ?");
       const row = stmt.get([""]);
 
-      expect((row as any).name).toBe("");
+      expect((row as UserRow).name).toBe("");
     });
   });
 
@@ -288,7 +306,7 @@ describe("SQLite NAPI - Parameter Binding", () => {
       const stmt = db.query("SELECT * FROM users WHERE name = ?");
       const row = stmt.get([specialString]);
 
-      expect((row as any).name).toBe(specialString);
+      expect((row as UserRow).name).toBe(specialString);
     });
 
     test("unicode in parameters", () => {
@@ -299,7 +317,7 @@ describe("SQLite NAPI - Parameter Binding", () => {
       const stmt = db.query("SELECT * FROM users WHERE name = ?");
       const row = stmt.get([unicodeName]);
 
-      expect((row as any).name).toBe(unicodeName);
+      expect((row as UserRow).name).toBe(unicodeName);
     });
 
     test("very long string parameter", () => {
@@ -310,7 +328,7 @@ describe("SQLite NAPI - Parameter Binding", () => {
       const stmt = db.query("SELECT * FROM users WHERE name = ?");
       const row = stmt.get([longString]);
 
-      expect((row as any).name).toBe(longString);
+      expect((row as UserRow).name).toBe(longString);
     });
   });
 

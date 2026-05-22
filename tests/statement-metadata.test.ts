@@ -7,10 +7,10 @@ describe("SQLite NAPI - Statement Metadata", () => {
   beforeEach(() => {
     db = new Database(":memory:");
     db.exec(
-      "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, age INTEGER, email TEXT)"
+      "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, age INTEGER, email TEXT)",
     );
     db.exec(
-      "CREATE TABLE posts (id INTEGER PRIMARY KEY, user_id INTEGER, title TEXT)"
+      "CREATE TABLE posts (id INTEGER PRIMARY KEY, user_id INTEGER, title TEXT)",
     );
     db.run("INSERT INTO users (name, age, email) VALUES (?, ?, ?)", [
       "Alice",
@@ -32,7 +32,7 @@ describe("SQLite NAPI - Statement Metadata", () => {
       const stmt = db.query("SELECT * FROM users");
       const columns = stmt.columns();
 
-      const columnNames = columns.map((c: any) => c.name);
+      const columnNames = columns.map((c) => c.name);
       expect(columnNames).toContain("id");
       expect(columnNames).toContain("name");
       expect(columnNames).toContain("age");
@@ -44,7 +44,7 @@ describe("SQLite NAPI - Statement Metadata", () => {
       const columns = stmt.columns();
 
       // Each column should have a type property (may be empty)
-      columns.forEach((col: any) => {
+      columns.forEach((col) => {
         expect(col).toHaveProperty("type");
       });
     });
@@ -54,19 +54,19 @@ describe("SQLite NAPI - Statement Metadata", () => {
       const columns = stmt.columns();
 
       expect(columns.length).toBe(2);
-      expect((columns[0] as any).name).toBe("name");
-      expect((columns[1] as any).name).toBe("age");
+      expect(columns[0].name).toBe("name");
+      expect(columns[1].name).toBe("age");
     });
 
     test("returns columns for aliased columns", () => {
       const stmt = db.query(
-        "SELECT name AS user_name, age AS user_age FROM users"
+        "SELECT name AS user_name, age AS user_age FROM users",
       );
       const columns = stmt.columns();
 
       expect(columns.length).toBe(2);
-      expect((columns[0] as any).name).toBe("user_name");
-      expect((columns[1] as any).name).toBe("user_age");
+      expect(columns[0].name).toBe("user_name");
+      expect(columns[1].name).toBe("user_age");
     });
 
     test("returns columns for expressions", () => {
@@ -74,20 +74,20 @@ describe("SQLite NAPI - Statement Metadata", () => {
       const columns = stmt.columns();
 
       expect(columns.length).toBe(1);
-      expect((columns[0] as any).name).toBe("count");
+      expect(columns[0].name).toBe("count");
     });
 
     test("returns columns for JOIN query", () => {
       db.run("INSERT INTO posts (user_id, title) VALUES (?, ?)", [1, "Hello"]);
 
       const stmt = db.query(
-        "SELECT users.name, posts.title FROM users JOIN posts ON users.id = posts.user_id"
+        "SELECT users.name, posts.title FROM users JOIN posts ON users.id = posts.user_id",
       );
       const columns = stmt.columns();
 
       expect(columns.length).toBe(2);
-      expect((columns[0] as any).name).toBe("name");
-      expect((columns[1] as any).name).toBe("title");
+      expect(columns[0].name).toBe("name");
+      expect(columns[1].name).toBe("title");
     });
 
     test("returns empty array for non-SELECT statement", () => {
@@ -191,9 +191,7 @@ describe("SQLite NAPI - Statement Metadata", () => {
       const columnsAfter = stmt.columns();
 
       expect(columnsBefore.length).toBe(columnsAfter.length);
-      expect((columnsBefore[0] as any).name).toBe(
-        (columnsAfter[0] as any).name
-      );
+      expect(columnsBefore[0].name).toBe(columnsAfter[0].name);
     });
   });
 
@@ -203,13 +201,13 @@ describe("SQLite NAPI - Statement Metadata", () => {
       const columns = stmt.columns();
 
       expect(columns.length).toBe(2);
-      expect((columns[0] as any).name).toBe("one");
-      expect((columns[1] as any).name).toBe("two");
+      expect(columns[0].name).toBe("one");
+      expect(columns[1].name).toBe("two");
     });
 
     test("columns for subquery", () => {
       const stmt = db.query(
-        "SELECT * FROM (SELECT name, age FROM users) AS sub"
+        "SELECT * FROM (SELECT name, age FROM users) AS sub",
       );
       const columns = stmt.columns();
 

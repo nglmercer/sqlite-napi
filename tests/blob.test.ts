@@ -1,6 +1,21 @@
 import { expect, test, describe, beforeEach } from "bun:test";
 import { Database } from "../index";
 
+interface FileRow {
+  id: number;
+  name: string;
+  data: string | null;
+  metadata: string | null;
+}
+
+interface SizeRow {
+  size: number;
+}
+
+interface DataRow {
+  data: string | null;
+}
+
 describe("SQLite NAPI - BLOB Support", () => {
   let db: Database;
 
@@ -21,7 +36,7 @@ describe("SQLite NAPI - BLOB Support", () => {
       const row = stmt.get(["test.bin"]);
 
       expect(row).toBeDefined();
-      expect((row as any).data).toBeDefined();
+      expect((row as FileRow).data).toBeDefined();
     });
 
     test("inserts Buffer as BLOB", () => {
@@ -33,7 +48,7 @@ describe("SQLite NAPI - BLOB Support", () => {
       const row = stmt.get(["hello.txt"]);
 
       expect(row).toBeDefined();
-      expect((row as any).data).toBeDefined();
+      expect((row as FileRow).data).toBeDefined();
     });
 
     test("inserts empty BLOB", () => {
@@ -59,7 +74,7 @@ describe("SQLite NAPI - BLOB Support", () => {
       const stmt = db.query("SELECT length(data) as size FROM files WHERE name = ?");
       const row = stmt.get(["large.bin"]);
 
-      expect((row as any).size).toBe(1024 * 1024);
+      expect((row as SizeRow).size).toBe(1024 * 1024);
     });
   });
 
@@ -73,7 +88,7 @@ describe("SQLite NAPI - BLOB Support", () => {
 
       expect(row).toBeDefined();
       // BLOB is returned as Base64 string
-      expect(typeof (row as any).data).toBe("string");
+      expect(typeof (row as FileRow).data).toBe("string");
     });
 
     test("retrieves BLOB with statement.all()", () => {
@@ -87,8 +102,8 @@ describe("SQLite NAPI - BLOB Support", () => {
       const rows = stmt.all();
 
       expect(rows.length).toBe(2);
-      expect(typeof (rows as any[])[0].data).toBe("string");
-      expect(typeof (rows as any[])[1].data).toBe("string");
+      expect(typeof (rows as FileRow[])[0].data).toBe("string");
+      expect(typeof (rows as FileRow[])[1].data).toBe("string");
     });
 
     test("retrieves BLOB with statement.values()", () => {
@@ -99,7 +114,7 @@ describe("SQLite NAPI - BLOB Support", () => {
       const values = stmt.values(["test.bin"]);
 
       expect(values.length).toBe(1);
-      expect(typeof (values as any[])[0][0]).toBe("string");
+      expect(typeof (values as string[][])[0][0]).toBe("string");
     });
   });
 
@@ -113,7 +128,7 @@ describe("SQLite NAPI - BLOB Support", () => {
 
       const row = iter.next();
       expect(row).toBeDefined();
-      expect(typeof (row as any).data).toBe("string");
+      expect(typeof (row as FileRow).data).toBe("string");
     });
 
     test("iterator nextValues with BLOB", () => {
@@ -136,7 +151,7 @@ describe("SQLite NAPI - BLOB Support", () => {
       const stmt = db.query("SELECT data FROM files WHERE name = ?");
       const row = stmt.get(["null.bin"]);
 
-      expect((row as any).data).toBeNull();
+      expect((row as FileRow).data).toBeNull();
     });
 
     test("handles BLOB with all byte values", () => {
@@ -150,7 +165,7 @@ describe("SQLite NAPI - BLOB Support", () => {
       const stmt = db.query("SELECT length(data) as size FROM files WHERE name = ?");
       const row = stmt.get(["all_bytes.bin"]);
 
-      expect((row as any).size).toBe(256);
+      expect((row as SizeRow).size).toBe(256);
     });
 
     test("handles BLOB with null bytes", () => {
@@ -161,7 +176,7 @@ describe("SQLite NAPI - BLOB Support", () => {
       const stmt = db.query("SELECT length(data) as size FROM files WHERE name = ?");
       const row = stmt.get(["nulls.bin"]);
 
-      expect((row as any).size).toBe(7);
+      expect((row as SizeRow).size).toBe(7);
     });
 
     test("handles binary string data", () => {
@@ -206,7 +221,7 @@ describe("SQLite NAPI - BLOB Support", () => {
       const row = stmt.get(["persist.bin"]);
 
       expect(row).toBeDefined();
-      expect((row as any).data).toBeDefined();
+      expect((row as FileRow).data).toBeDefined();
 
       db2.close();
     });
@@ -228,7 +243,7 @@ describe("SQLite NAPI - BLOB Support", () => {
       const stmt = db2.query("SELECT length(data) as size FROM files WHERE name = ?");
       const row = stmt.get(["large_persist.bin"]);
 
-      expect((row as any).size).toBe(100 * 1024);
+      expect((row as SizeRow).size).toBe(100 * 1024);
 
       db2.close();
     });
@@ -261,8 +276,8 @@ describe("SQLite NAPI - BLOB Support", () => {
       const row = stmt.get(["multi.bin"]);
 
       expect(row).toBeDefined();
-      expect((row as any).data).toBeDefined();
-      expect((row as any).metadata).toBeDefined();
+      expect((row as FileRow).data).toBeDefined();
+      expect((row as FileRow).metadata).toBeDefined();
     });
   });
 

@@ -117,8 +117,8 @@ describe("SQLite NAPI - Error Handling", () => {
     let errorMessage = "";
     try {
       db.exec("SELECT * FROM nonexistent");
-    } catch (e: any) {
-      errorMessage = e.message || String(e);
+    } catch (e: unknown) {
+      errorMessage = (e as Error).message || String(e);
     }
     
     expect(errorMessage.length).toBeGreaterThan(0);

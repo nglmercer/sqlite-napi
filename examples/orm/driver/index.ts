@@ -281,7 +281,7 @@ export function sqliteNapi(
         typeof options === "string" ||
         ("sql" in options && "params" in options)
       ) {
-        q = q.where(options as any, params);
+        q = q.where(options as unknown as string | SQLFragment, params);
       } else {
         const opt = options as QueryOptions;
         if (opt.as) q = q.as(opt.as);
@@ -296,13 +296,13 @@ export function sqliteNapi(
             const joinTable = join.as ? `${tableRef} AS ${join.as}` : tableRef;
 
             if (join.type === "left")
-              q = q.leftJoin(joinTable, join.on as any, join.params);
+              q = q.leftJoin(joinTable, join.on as unknown as string | SQLFragment, join.params);
             else if (join.type === "inner")
-              q = q.join(joinTable, join.on as any, join.params);
+              q = q.join(joinTable, join.on as unknown as string | SQLFragment, join.params);
             else if (join.type === "right")
-              q = q.rightJoin(joinTable, join.on as any, join.params);
+              q = q.rightJoin(joinTable, join.on as unknown as string | SQLFragment, join.params);
             else if (join.type === "full")
-              q = q.fullJoin(joinTable, join.on as any, join.params);
+              q = q.fullJoin(joinTable, join.on as unknown as string | SQLFragment, join.params);
           }
         }
 
@@ -331,7 +331,7 @@ export function sqliteNapi(
         typeof options === "string" ||
         ("sql" in options && "params" in options)
       ) {
-        q = q.where(options as any, params);
+        q = q.where(options as unknown as string | SQLFragment, params);
       } else {
         const opt = options as QueryOptions;
         if (opt.as) q = q.as(opt.as);
@@ -346,13 +346,13 @@ export function sqliteNapi(
             const joinTable = join.as ? `${tableRef} AS ${join.as}` : tableRef;
 
             if (join.type === "left")
-              q = q.leftJoin(joinTable, join.on as any, join.params);
+              q = q.leftJoin(joinTable, join.on as unknown as string | SQLFragment, join.params);
             else if (join.type === "inner")
-              q = q.join(joinTable, join.on as any, join.params);
+              q = q.join(joinTable, join.on as unknown as string | SQLFragment, join.params);
             else if (join.type === "right")
-              q = q.rightJoin(joinTable, join.on as any, join.params);
+              q = q.rightJoin(joinTable, join.on as unknown as string | SQLFragment, join.params);
             else if (join.type === "full")
-              q = q.fullJoin(joinTable, join.on as any, join.params);
+              q = q.fullJoin(joinTable, join.on as unknown as string | SQLFragment, join.params);
           }
         }
 
@@ -386,8 +386,9 @@ export function sqliteNapi(
         },
       };
       // Only add query() if tx supports it
-      if ("query" in tx && typeof tx.query === "function") {
-        txQueryable.query = (sqlStr: string) => (tx as any).query(sqlStr);
+      const txQuery = tx.query;
+      if (txQuery) {
+        txQueryable.query = (sqlStr: string) => txQuery(sqlStr);
       }
 
       try {

@@ -6,6 +6,23 @@ import { Database } from "../index";
  * as specified in the ROADMAP.md
  */
 
+interface CountRow {
+  count: number;
+}
+
+interface UserRow {
+  id: number;
+  name: string;
+  bio: string;
+}
+
+interface ItemRow {
+  id: number;
+  name: string;
+  price: number;
+  active: number;
+}
+
 describe("SQLite NAPI - Bun API Compatibility", () => {
   let db: Database;
 
@@ -30,7 +47,7 @@ describe("SQLite NAPI - Bun API Compatibility", () => {
       memoryDb.exec("CREATE TABLE test (id INTEGER)");
       const stmt = memoryDb.query("SELECT COUNT(*) as count FROM test");
       const row = stmt.get([]);
-      expect((row as any).count).toBe(0);
+      expect((row as CountRow).count).toBe(0);
     });
   });
 
@@ -70,8 +87,8 @@ describe("SQLite NAPI - Bun API Compatibility", () => {
       
       expect(Array.isArray(rows)).toBe(true);
       expect(rows.length).toBe(2);
-      expect((rows[0] as any).name).toBe("Alice");
-      expect((rows[1] as any).name).toBe("Bob");
+      expect((rows[0] as UserRow).name).toBe("Alice");
+      expect((rows[1] as UserRow).name).toBe("Bob");
     });
 
     test("matches bun:sqlite - statement.get(params) returns first row", () => {
@@ -79,8 +96,8 @@ describe("SQLite NAPI - Bun API Compatibility", () => {
       const row = stmt.get(["Alice"]);
       
       expect(row).toBeDefined();
-      expect((row as any).name).toBe("Alice");
-      expect((row as any).bio).toBe("Loves Rust");
+      expect((row as UserRow).name).toBe("Alice");
+      expect((row as UserRow).bio).toBe("Loves Rust");
     });
 
     test("matches bun:sqlite - statement.get(params) returns null if not found", () => {
@@ -122,8 +139,8 @@ describe("SQLite NAPI - Bun API Compatibility", () => {
       const stmt = db.query("SELECT * FROM items WHERE name = ?");
       const row = stmt.get(["Widget"]);
       
-      expect((row as any).name).toBe("Widget");
-      expect((row as any).price).toBeCloseTo(9.99);
+      expect((row as ItemRow).name).toBe("Widget");
+      expect((row as ItemRow).price).toBeCloseTo(9.99);
     });
 
     test("matches bun:sqlite - multiple positional parameters", () => {
@@ -132,8 +149,8 @@ describe("SQLite NAPI - Bun API Compatibility", () => {
       const stmt = db.query("SELECT * FROM items WHERE name = ? AND active = ?");
       const row = stmt.get(["Gadget", 1]);
       
-      expect((row as any).name).toBe("Gadget");
-      expect((row as any).active).toBe(1);
+      expect((row as ItemRow).name).toBe("Gadget");
+      expect((row as ItemRow).active).toBe(1);
     });
   });
 
@@ -194,7 +211,7 @@ describe("SQLite NAPI - Bun API Compatibility", () => {
       
       const stmt = db.query("SELECT COUNT(*) as count FROM accounts");
       const row = stmt.get([]);
-      expect((row as any).count).toBe(2);
+      expect((row as CountRow).count).toBe(2);
     });
 
     test("matches bun:sqlite - rollback() reverts changes", () => {
@@ -204,7 +221,7 @@ describe("SQLite NAPI - Bun API Compatibility", () => {
       
       const stmt = db.query("SELECT COUNT(*) as count FROM accounts");
       const row = stmt.get([]);
-      expect((row as any).count).toBe(1);
+      expect((row as CountRow).count).toBe(1);
     });
   });
 });

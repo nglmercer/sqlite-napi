@@ -17,7 +17,7 @@ describe("SQLite NAPI - Schema Introspection", () => {
     test("returns list of tables after creation", () => {
       db.exec("CREATE TABLE users (id INTEGER PRIMARY KEY)");
       db.exec("CREATE TABLE posts (id INTEGER PRIMARY KEY)");
-      
+
       const tables = db.getTables();
       expect(tables).toContain("users");
       expect(tables).toContain("posts");
@@ -26,7 +26,7 @@ describe("SQLite NAPI - Schema Introspection", () => {
 
     test("excludes sqlite_ internal tables", () => {
       db.exec("CREATE TABLE users (id INTEGER PRIMARY KEY)");
-      
+
       const tables = db.getTables();
       expect(tables).not.toContain("sqlite_master");
       expect(tables).not.toContain("sqlite_sequence");
@@ -36,7 +36,7 @@ describe("SQLite NAPI - Schema Introspection", () => {
       db.exec("CREATE TABLE zebra (id INTEGER)");
       db.exec("CREATE TABLE alpha (id INTEGER)");
       db.exec("CREATE TABLE middle (id INTEGER)");
-      
+
       const tables = db.getTables();
       expect(tables).toEqual(["alpha", "middle", "zebra"]);
     });
@@ -44,29 +44,33 @@ describe("SQLite NAPI - Schema Introspection", () => {
 
   describe("get_columns", () => {
     test("returns column information for a table", () => {
-      db.exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT UNIQUE)");
-      
+      db.exec(
+        "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT UNIQUE)",
+      );
+
       const columns = db.getColumns("users");
-      
+
       expect(columns.length).toBe(3);
-      
-      const idCol = columns.find((c: any) => c.name === "id");
+
+      const idCol = columns.find((c) => c.name === "id");
       expect(idCol).toBeDefined();
       expect(idCol?.type).toBe("INTEGER");
       expect(idCol?.pk).toBe(1);
-      
-      const nameCol = columns.find((c: any) => c.name === "name");
+
+      const nameCol = columns.find((c) => c.name === "name");
       expect(nameCol).toBeDefined();
       expect(nameCol?.type).toBe("TEXT");
       expect(nameCol?.notnull).toBe(true);
     });
 
     test("returns default values correctly", () => {
-      db.exec("CREATE TABLE items (id INTEGER PRIMARY KEY, count INTEGER DEFAULT 0)");
-      
+      db.exec(
+        "CREATE TABLE items (id INTEGER PRIMARY KEY, count INTEGER DEFAULT 0)",
+      );
+
       const columns = db.getColumns("items");
-      const countCol = columns.find((c: any) => c.name === "count");
-      
+      const countCol = columns.find((c) => c.name === "count");
+
       expect(countCol?.dflt_value).toBe("0");
     });
 
@@ -79,7 +83,7 @@ describe("SQLite NAPI - Schema Introspection", () => {
   describe("get_indexes", () => {
     test("returns empty array for table with no indexes", () => {
       db.exec("CREATE TABLE users (id INTEGER PRIMARY KEY)");
-      
+
       const indexes = db.getIndexes("users");
       expect(indexes).toEqual([]);
     });
@@ -87,19 +91,21 @@ describe("SQLite NAPI - Schema Introspection", () => {
     test("returns index information", () => {
       db.exec("CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT)");
       db.exec("CREATE INDEX idx_email ON users (email)");
-      
+
       const indexes = db.getIndexes("users");
-      
+
       // Note: SQLite may not return indexes created via CREATE INDEX in PRAGMA index_list
       // depending on the SQLite version and configuration
       expect(Array.isArray(indexes)).toBe(true);
     });
 
     test("returns multiple indexes", () => {
-      db.exec("CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT, name TEXT)");
+      db.exec(
+        "CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT, name TEXT)",
+      );
       db.exec("CREATE INDEX idx_email ON users (email)");
       db.exec("CREATE INDEX idx_name ON users (name)");
-      
+
       const indexes = db.getIndexes("users");
       // Note: SQLite may not return indexes created via CREATE INDEX in PRAGMA index_list
       expect(Array.isArray(indexes)).toBe(true);
@@ -109,9 +115,9 @@ describe("SQLite NAPI - Schema Introspection", () => {
   describe("get_table_sql", () => {
     test("returns CREATE statement for table", () => {
       db.exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)");
-      
+
       const sql = db.getTableSql("users");
-      
+
       expect(sql).toBeDefined();
       expect(sql).toContain("CREATE TABLE");
       expect(sql).toContain("users");
@@ -133,9 +139,9 @@ describe("SQLite NAPI - Schema Introspection", () => {
     test("returns CREATE statements for all tables", () => {
       db.exec("CREATE TABLE users (id INTEGER PRIMARY KEY)");
       db.exec("CREATE TABLE posts (id INTEGER PRIMARY KEY)");
-      
+
       const schema = db.exportSchema();
-      
+
       expect(schema).toContain("CREATE TABLE users");
       expect(schema).toContain("CREATE TABLE posts");
     });
@@ -143,9 +149,9 @@ describe("SQLite NAPI - Schema Introspection", () => {
     test("includes indexes in schema", () => {
       db.exec("CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT)");
       db.exec("CREATE INDEX idx_email ON users (email)");
-      
+
       const schema = db.exportSchema();
-      
+
       expect(schema).toContain("CREATE TABLE users");
       expect(schema).toContain("CREATE INDEX idx_email");
     });
@@ -173,9 +179,9 @@ describe("SQLite NAPI - Schema Introspection", () => {
       db.exec("CREATE TABLE users (id INTEGER PRIMARY KEY)");
       db.exec("CREATE TABLE posts (id INTEGER PRIMARY KEY)");
       db.exec("CREATE INDEX idx_users ON users (id)");
-      
+
       const metadata = db.getMetadata();
-      
+
       // Use the correct property names from the Rust implementation
       expect(metadata.table_count).toBe(2);
       expect(metadata.index_count).toBeGreaterThanOrEqual(0);
@@ -188,10 +194,10 @@ describe("SQLite NAPI - Schema Introspection", () => {
     test("returns correct table count", () => {
       const before = db.getMetadata();
       expect(before.table_count).toBe(0);
-      
+
       db.exec("CREATE TABLE test1 (id INTEGER)");
       db.exec("CREATE TABLE test2 (id INTEGER)");
-      
+
       const after = db.getMetadata();
       expect(after.table_count).toBe(2);
     });

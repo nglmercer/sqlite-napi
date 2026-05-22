@@ -342,7 +342,7 @@ impl Database {
             .conn
             .lock()
             .map_err(|_| Error::from_reason("DB Lock failed"))?;
-        let mut stmt = conn.prepare("SELECT sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY CASE WHEN type = 'table' THEN 1 WHEN type = 'index' THEN 2 ELSE 3 END, name").map_err(to_napi_error)?;
+        let mut stmt = conn.prepare_cached("SELECT sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY CASE WHEN type = 'table' THEN 1 WHEN type = 'index' THEN 2 ELSE 3 END, name").map_err(to_napi_error)?;
         let statements: Vec<String> = stmt
             .query_map([], |row| row.get(0))
             .map_err(to_napi_error)?
@@ -373,7 +373,7 @@ impl Database {
             .conn
             .lock()
             .map_err(|_| Error::from_reason("DB Lock failed"))?;
-        let mut stmt = conn.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name").map_err(to_napi_error)?;
+        let mut stmt = conn.prepare_cached("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name").map_err(to_napi_error)?;
         let tables: Vec<String> = stmt
             .query_map([], |row| row.get(0))
             .map_err(to_napi_error)?
@@ -468,7 +468,7 @@ impl Database {
             .conn
             .lock()
             .map_err(|_| Error::from_reason("DB Lock failed"))?;
-        let mut stmt = conn.prepare("SELECT sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY CASE WHEN type = 'table' THEN 1 WHEN type = 'index' THEN 2 ELSE 3 END, name").map_err(to_napi_error)?;
+        let mut stmt = conn.prepare_cached("SELECT sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY CASE WHEN type = 'table' THEN 1 WHEN type = 'index' THEN 2 ELSE 3 END, name").map_err(to_napi_error)?;
         let statements: Vec<String> = stmt
             .query_map([], |row| row.get(0))
             .map_err(to_napi_error)?

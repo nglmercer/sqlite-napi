@@ -1,5 +1,3 @@
-//! Params module - utilities for converting NAPI values to SQLite parameters
-
 use napi::bindgen_prelude::*;
 use rusqlite::types::{ToSqlOutput, ValueRef};
 use rusqlite::ToSql;
@@ -31,31 +29,25 @@ impl ToSql for Param {
     }
 }
 
-/// Convert a JavaScript value to a SQLite parameter
 pub fn js_to_param(val: &Unknown) -> Result<Param> {
     match val.get_type()? {
         ValueType::Undefined | ValueType::Null => Ok(Param::Null),
         ValueType::Boolean => Ok(Param::Bool(val.coerce_to_bool()?)),
         ValueType::Number => {
-            // Try to get as int32 first - if it fails, get as float
             let num = val.coerce_to_number()?;
-            // Try getting as double first - if it's a float it will work
-            if let Ok(d) = num.get_double() {
-                // Check if it's actually a whole number that fits in i64
+            if let Ok(i) = num.get_int32() {
+                Ok(Param::Int(i as i64))
+            } else if let Ok(d) = num.get_double() {
                 if d.fract() == 0.0
-                    && d.abs() < (i64::MAX as f64)
-                    && d.abs() < (i64::MIN as f64).abs()
+                    && d >= (i64::MIN as f64)
+                    && d <= (i64::MAX as f64)
                 {
                     Ok(Param::Int(d as i64))
                 } else {
                     Ok(Param::Float(d))
                 }
-            } else if let Ok(i) = num.get_int32() {
-                Ok(Param::Int(i as i64))
             } else {
-                // Fallback - try to get as int64
-                let n = val.coerce_to_number()?;
-                Ok(Param::Float(n.get_double().unwrap_or(0.0)))
+                Ok(Param::Null)
             }
         }
         ValueType::String => {
@@ -71,23 +63,19 @@ pub fn js_to_param(val: &Unknown) -> Result<Param> {
                 let buf = unsafe { val.cast::<Buffer>()? };
                 Ok(Param::Blob(buf.as_ref().to_vec()))
             } else if val.is_date()? {
-                // Coerces to number to get timestamp
                 let num = val.coerce_to_number()?;
                 Ok(Param::Float(num.get_double()?))
             } else if val.is_arraybuffer()? || val.is_typedarray()? {
-                // Handle ArrayBuffer and TypedArray (like Uint8Array)
                 let env = Env::from_raw(val.env());
                 let json_value: serde_json::Value = env.from_js_value(*val)?;
-                // Try to convert to blob if it's an array of numbers
                 if let Some(arr) = json_value.as_array() {
-                    let mut bytes = Vec::new();
+                    let mut bytes = Vec::with_capacity(arr.len());
                     for item in arr {
                         if let Some(n) = item.as_i64() {
                             bytes.push(n as u8);
                         } else if let Some(n) = item.as_u64() {
                             bytes.push(n as u8);
                         } else {
-                            // Not an array of numbers, convert to string
                             return Ok(Param::Text(json_value.to_string()));
                         }
                     }
@@ -104,7 +92,48 @@ pub fn js_to_param(val: &Unknown) -> Result<Param> {
     }
 }
 
-/// Convert a serde_json::Value to Param
+pub enum ParamsContainer {
+    Positional(Vec<Param>),
+    Named(HashMap<String, Param>),
+}
+
+pub fn convert_params_container(_env: &Env, params: Option<Unknown>) -> Result<ParamsContainer> {
+    if let Some(p) = params {
+        if p.is_array()? {
+            let arr = unsafe { p.cast::<Array>()? };
+            let len = arr.len();
+            let mut result = Vec::with_capacity(len as usize);
+            for i in 0..len {
+                result.push(js_to_param(&arr.get_element(i)?)?);
+            }
+            Ok(ParamsContainer::Positional(result))
+        } else if p.get_type()? == ValueType::Object {
+            let env = Env::from_raw(p.env());
+            let json_value: serde_json::Value = env.from_js_value(p)?;
+
+            if let serde_json::Value::Object(map) = json_value {
+                let mut result = HashMap::new();
+                for (key, value) in map.iter() {
+                    let normalized_key =
+                        if key.starts_with('$') || key.starts_with(':') || key.starts_with('@') {
+                            key.to_string()
+                        } else {
+                            format!("${}", key)
+                        };
+                    result.insert(normalized_key, json_value_to_param(value)?);
+                }
+                Ok(ParamsContainer::Named(result))
+            } else {
+                Ok(ParamsContainer::Positional(vec![js_to_param(&p)?]))
+            }
+        } else {
+            Ok(ParamsContainer::Positional(vec![js_to_param(&p)?]))
+        }
+    } else {
+        Ok(ParamsContainer::Positional(Vec::new()))
+    }
+}
+
 fn json_value_to_param(value: &serde_json::Value) -> Result<Param> {
     match value {
         serde_json::Value::Null => Ok(Param::Null),
@@ -125,76 +154,21 @@ fn json_value_to_param(value: &serde_json::Value) -> Result<Param> {
     }
 }
 
-/// Parameter container that supports both positional and named parameters
-pub enum ParamsContainer {
-    Positional(Vec<Param>),
-    Named(HashMap<String, Param>),
-}
-
-/// Convert JavaScript parameters to a ParamsContainer
-/// Handles arrays (positional) and objects (named parameters)
-pub fn convert_params_container(_env: &Env, params: Option<Unknown>) -> Result<ParamsContainer> {
-    if let Some(p) = params {
-        if p.is_array()? {
-            // Positional parameters: [value1, value2, ...]
-            let arr = unsafe { p.cast::<Array>()? };
-            let mut result = Vec::new();
-            for i in 0..arr.len() {
-                result.push(js_to_param(&arr.get_element(i)?)?);
-            }
-            Ok(ParamsContainer::Positional(result))
-        } else if p.get_type()? == ValueType::Object {
-            // Named parameters: { $name: value, :name: value, @name: value }
-            let env = Env::from_raw(p.env());
-            let json_value: serde_json::Value = env.from_js_value(p)?;
-
-            if let serde_json::Value::Object(map) = json_value {
-                let mut result = HashMap::new();
-                for (key, value) in map.iter() {
-                    // Normalize the parameter name - SQLite accepts $name, :name, @name
-                    // We need to ensure the key matches what SQLite expects
-                    let normalized_key =
-                        if key.starts_with('$') || key.starts_with(':') || key.starts_with('@') {
-                            key.to_string()
-                        } else {
-                            // If no prefix, add $ prefix (bun:sqlite style)
-                            format!("${}", key)
-                        };
-                    result.insert(normalized_key, json_value_to_param(value)?);
-                }
-                Ok(ParamsContainer::Named(result))
-            } else {
-                Ok(ParamsContainer::Positional(vec![js_to_param(&p)?]))
-            }
-        } else {
-            Ok(ParamsContainer::Positional(vec![js_to_param(&p)?]))
-        }
-    } else {
-        Ok(ParamsContainer::Positional(Vec::new()))
-    }
-}
-
-/// Convert JavaScript parameters to rusqlite parameters
-/// Handles arrays (positional) and objects (named parameters)
-#[allow(unused_variables)]
-pub fn convert_params(env: &Env, params: Option<Unknown>) -> Result<Vec<Param>> {
+pub fn convert_params(_env: &Env, params: Option<Unknown>) -> Result<Vec<Param>> {
     let mut result = Vec::new();
     if let Some(p) = params {
         if p.is_array()? {
-            // Positional parameters: [value1, value2, ...]
             let arr = unsafe { p.cast::<Array>()? };
-            for i in 0..arr.len() {
+            let len = arr.len();
+            result.reserve(len as usize);
+            for i in 0..len {
                 result.push(js_to_param(&arr.get_element(i)?)?);
             }
         } else if p.get_type()? == ValueType::Object {
-            // Named parameters: { $name: value, :name: value, @name: value }
-            // Convert to a string representation that rusqlite can parse
             let env = Env::from_raw(p.env());
             let json_value: serde_json::Value = env.from_js_value(p)?;
 
             if let serde_json::Value::Object(map) = json_value {
-                // For named parameters, we need to build a list of values in order
-                // SQLite named parameters are $name, :name, or @name
                 for (_key, value) in map.iter() {
                     result.push(json_value_to_param(value)?);
                 }

@@ -14,10 +14,18 @@ pub fn to_napi_error_with_context(err: SqliteError, context: Option<&str>) -> Er
                 None => format!("SQLite Error [Extended Code {}]: {}", code, ffi_err),
             }
         }
-        SqliteError::ToSqlConversionFailure(e) => format!("SQLite Parameter Conversion Error: {}", e),
-        SqliteError::FromSqlConversionFailure(_, t, e) => format!("SQLite Result Conversion Error (type {:?}): {}", t, e),
-        SqliteError::InvalidParameterName(name) => format!("SQLite Invalid Parameter Name: {}", name),
-        SqliteError::InvalidColumnType(idx, name, t) => format!("SQLite Invalid Column Type at {} ({}): {:?}", idx, name, t),
+        SqliteError::ToSqlConversionFailure(e) => {
+            format!("SQLite Parameter Conversion Error: {}", e)
+        }
+        SqliteError::FromSqlConversionFailure(_, t, e) => {
+            format!("SQLite Result Conversion Error (type {:?}): {}", t, e)
+        }
+        SqliteError::InvalidParameterName(name) => {
+            format!("SQLite Invalid Parameter Name: {}", name)
+        }
+        SqliteError::InvalidColumnType(idx, name, t) => {
+            format!("SQLite Invalid Column Type at {} ({}): {:?}", idx, name, t)
+        }
         _ => format!("SQLite Error: {}", err),
     };
 
@@ -28,4 +36,3 @@ pub fn to_napi_error_with_context(err: SqliteError, context: Option<&str>) -> Er
 
     Error::new(Status::GenericFailure, final_msg)
 }
-

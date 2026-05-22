@@ -186,11 +186,17 @@ impl Database {
             crate::db::ParamsContainer::Positional(positional_params) => {
                 let params_refs: Vec<&dyn ToSql> =
                     positional_params.iter().map(|p| p as &dyn ToSql).collect();
-                conn.execute(&sql, params_refs.as_slice())
-                    .map_err(|e| {
-                        let snippet = if sql.len() > 100 { format!("{}...", &sql[..100]) } else { sql.clone() };
-                        crate::error::to_napi_error_with_context(e, Some(&format!("Query failed: {}", snippet)))
-                    })?;
+                conn.execute(&sql, params_refs.as_slice()).map_err(|e| {
+                    let snippet = if sql.len() > 100 {
+                        format!("{}...", &sql[..100])
+                    } else {
+                        sql.clone()
+                    };
+                    crate::error::to_napi_error_with_context(
+                        e,
+                        Some(&format!("Query failed: {}", snippet)),
+                    )
+                })?;
             }
             crate::db::ParamsContainer::Named(named_params) => {
                 let mut named_params_refs: Vec<(&str, &dyn ToSql)> = Vec::new();
@@ -199,8 +205,15 @@ impl Database {
                 }
                 conn.execute(&sql, named_params_refs.as_slice())
                     .map_err(|e| {
-                        let snippet = if sql.len() > 100 { format!("{}...", &sql[..100]) } else { sql.clone() };
-                        crate::error::to_napi_error_with_context(e, Some(&format!("Query failed: {}", snippet)))
+                        let snippet = if sql.len() > 100 {
+                            format!("{}...", &sql[..100])
+                        } else {
+                            sql.clone()
+                        };
+                        crate::error::to_napi_error_with_context(
+                            e,
+                            Some(&format!("Query failed: {}", snippet)),
+                        )
                     })?;
             }
         }
@@ -219,8 +232,15 @@ impl Database {
             .lock()
             .map_err(|_| Error::from_reason("DB Lock failed"))?;
         conn.execute_batch(&sql).map_err(|e| {
-            let snippet = if sql.len() > 100 { format!("{}...", &sql[..100]) } else { sql.clone() };
-            crate::error::to_napi_error_with_context(e, Some(&format!("Execute failed: {}", snippet)))
+            let snippet = if sql.len() > 100 {
+                format!("{}...", &sql[..100])
+            } else {
+                sql.clone()
+            };
+            crate::error::to_napi_error_with_context(
+                e,
+                Some(&format!("Execute failed: {}", snippet)),
+            )
         })?;
         Ok(QueryResult {
             changes: conn.changes() as u32,
@@ -273,8 +293,15 @@ impl Database {
         for (i, sql) in statements.iter().enumerate() {
             if let Err(e) = conn.execute_batch(sql) {
                 conn.execute("ROLLBACK", []).ok();
-                let snippet = if sql.len() > 100 { format!("{}...", &sql[..100]) } else { sql.clone() };
-                return Err(crate::error::to_napi_error_with_context(e, Some(&format!("Transaction statement {} failed: {}", i, snippet))));
+                let snippet = if sql.len() > 100 {
+                    format!("{}...", &sql[..100])
+                } else {
+                    sql.clone()
+                };
+                return Err(crate::error::to_napi_error_with_context(
+                    e,
+                    Some(&format!("Transaction statement {} failed: {}", i, snippet)),
+                ));
             }
         }
         conn.execute("COMMIT", []).map_err(|e| {
@@ -845,14 +872,20 @@ impl Database {
                                             row.get(0)
                                         })
                                         .map_err(|e| {
-                                            crate::error::to_napi_error_with_context(e, Some(&format!("Pragma set failed: {}", name)))
+                                            crate::error::to_napi_error_with_context(
+                                                e,
+                                                Some(&format!("Pragma set failed: {}", name)),
+                                            )
                                         })?;
                                     return Ok(serde_json::Value::Number(result.into()));
                                 }
                                 // Execute the pragma (integer pragmas don't return results)
                                 conn.execute(&format!("PRAGMA {} = {}", name, i), [])
                                     .map_err(|e| {
-                                        crate::error::to_napi_error_with_context(e, Some(&format!("Pragma set failed: {}", name)))
+                                        crate::error::to_napi_error_with_context(
+                                            e,
+                                            Some(&format!("Pragma set failed: {}", name)),
+                                        )
                                     })?;
                             }
                             crate::db::Param::Text(s) => {
@@ -862,7 +895,10 @@ impl Database {
                                         row.get(0)
                                     })
                                     .map_err(|e| {
-                                        crate::error::to_napi_error_with_context(e, Some(&format!("Pragma set failed: {}", name)))
+                                        crate::error::to_napi_error_with_context(
+                                            e,
+                                            Some(&format!("Pragma set failed: {}", name)),
+                                        )
                                     })?;
                                 return Ok(serde_json::Value::String(result));
                             }
@@ -874,12 +910,18 @@ impl Database {
                                 {
                                     conn.execute(&format!("PRAGMA {} = {}", name, *f as i64), [])
                                         .map_err(|e| {
-                                            crate::error::to_napi_error_with_context(e, Some(&format!("Pragma set failed: {}", name)))
+                                            crate::error::to_napi_error_with_context(
+                                                e,
+                                                Some(&format!("Pragma set failed: {}", name)),
+                                            )
                                         })?;
                                 } else {
                                     conn.execute(&format!("PRAGMA {} = {}", name, *f), [])
                                         .map_err(|e| {
-                                            crate::error::to_napi_error_with_context(e, Some(&format!("Pragma set failed: {}", name)))
+                                            crate::error::to_napi_error_with_context(
+                                                e,
+                                                Some(&format!("Pragma set failed: {}", name)),
+                                            )
                                         })?;
                                 }
                             }
@@ -899,7 +941,10 @@ impl Database {
                             crate::db::Param::Int(i) => {
                                 conn.execute(&format!("PRAGMA {} = {}", name, i), [])
                                     .map_err(|e| {
-                                        crate::error::to_napi_error_with_context(e, Some(&format!("Pragma set failed: {}", name)))
+                                        crate::error::to_napi_error_with_context(
+                                            e,
+                                            Some(&format!("Pragma set failed: {}", name)),
+                                        )
                                     })?;
                             }
                             crate::db::Param::Text(s) => {
@@ -908,7 +953,10 @@ impl Database {
                                         row.get(0)
                                     })
                                     .map_err(|e| {
-                                        crate::error::to_napi_error_with_context(e, Some(&format!("Pragma set failed: {}", name)))
+                                        crate::error::to_napi_error_with_context(
+                                            e,
+                                            Some(&format!("Pragma set failed: {}", name)),
+                                        )
                                     })?;
                                 return Ok(serde_json::Value::String(result));
                             }
@@ -916,12 +964,18 @@ impl Database {
                                 if *f == f.floor() && f.abs() < (i64::MAX as f64) {
                                     conn.execute(&format!("PRAGMA {} = {}", name, *f as i64), [])
                                         .map_err(|e| {
-                                            crate::error::to_napi_error_with_context(e, Some(&format!("Pragma set failed: {}", name)))
+                                            crate::error::to_napi_error_with_context(
+                                                e,
+                                                Some(&format!("Pragma set failed: {}", name)),
+                                            )
                                         })?;
                                 } else {
                                     conn.execute(&format!("PRAGMA {} = {}", name, *f), [])
                                         .map_err(|e| {
-                                            crate::error::to_napi_error_with_context(e, Some(&format!("Pragma set failed: {}", name)))
+                                            crate::error::to_napi_error_with_context(
+                                                e,
+                                                Some(&format!("Pragma set failed: {}", name)),
+                                            )
                                         })?;
                                 }
                             }
@@ -936,11 +990,12 @@ impl Database {
             }
 
             // Read back the pragma value after setting it
-            let mut stmt = conn
-                .prepare(&format!("PRAGMA {}", name))
-                .map_err(|e| {
-                    crate::error::to_napi_error_with_context(e, Some(&format!("Pragma read failed: {}", name)))
-                })?;
+            let mut stmt = conn.prepare(&format!("PRAGMA {}", name)).map_err(|e| {
+                crate::error::to_napi_error_with_context(
+                    e,
+                    Some(&format!("Pragma read failed: {}", name)),
+                )
+            })?;
             let results: Vec<serde_json::Value> = stmt
                 .query_map([], |row| {
                     let val: std::result::Result<String, _> = row.get(0);
@@ -956,7 +1011,10 @@ impl Database {
                     }
                 })
                 .map_err(|e| {
-                    crate::error::to_napi_error_with_context(e, Some(&format!("Pragma read failed: {}", name)))
+                    crate::error::to_napi_error_with_context(
+                        e,
+                        Some(&format!("Pragma read failed: {}", name)),
+                    )
                 })?
                 .filter_map(|r| r.ok())
                 .collect();
@@ -968,11 +1026,12 @@ impl Database {
                 Ok(serde_json::Value::Array(results))
             }
         } else {
-            let mut stmt = conn
-                .prepare(&format!("PRAGMA {}", name))
-                .map_err(|e| {
-                    crate::error::to_napi_error_with_context(e, Some(&format!("Pragma read failed: {}", name)))
-                })?;
+            let mut stmt = conn.prepare(&format!("PRAGMA {}", name)).map_err(|e| {
+                crate::error::to_napi_error_with_context(
+                    e,
+                    Some(&format!("Pragma read failed: {}", name)),
+                )
+            })?;
             let results: Vec<serde_json::Value> = stmt
                 .query_map([], |row| {
                     let val: std::result::Result<String, _> = row.get(0);
@@ -988,7 +1047,10 @@ impl Database {
                     }
                 })
                 .map_err(|e| {
-                    crate::error::to_napi_error_with_context(e, Some(&format!("Pragma read failed: {}", name)))
+                    crate::error::to_napi_error_with_context(
+                        e,
+                        Some(&format!("Pragma read failed: {}", name)),
+                    )
                 })?
                 .filter_map(|r| r.ok())
                 .collect();

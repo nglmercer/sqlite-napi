@@ -1,4 +1,5 @@
 use napi::bindgen_prelude::*;
+use napi::JsValue;
 use rusqlite::types::{ToSqlOutput, ValueRef};
 use rusqlite::ToSql;
 use std::collections::HashMap;
@@ -29,6 +30,11 @@ impl ToSql for Param {
     }
 }
 
+pub enum ParamsContainer {
+    Positional(Vec<Param>),
+    Named(HashMap<String, Param>),
+}
+
 pub fn js_to_param(val: &Unknown) -> Result<Param> {
     match val.get_type()? {
         ValueType::Undefined | ValueType::Null => Ok(Param::Null),
@@ -36,10 +42,7 @@ pub fn js_to_param(val: &Unknown) -> Result<Param> {
         ValueType::Number => {
             let num = val.coerce_to_number()?;
             if let Ok(d) = num.get_double() {
-                if d.fract() == 0.0
-                    && d >= (i64::MIN as f64)
-                    && d <= (i64::MAX as f64)
-                {
+                if d.fract() == 0.0 && d >= (i64::MIN as f64) && d <= (i64::MAX as f64) {
                     Ok(Param::Int(d as i64))
                 } else {
                     Ok(Param::Float(d))
@@ -65,25 +68,11 @@ pub fn js_to_param(val: &Unknown) -> Result<Param> {
             } else if val.is_date()? {
                 let num = val.coerce_to_number()?;
                 Ok(Param::Float(num.get_double()?))
-            } else if val.is_arraybuffer()? || val.is_typedarray()? {
-                let env = Env::from_raw(val.env());
-                let json_value: serde_json::Value = env.from_js_value(*val)?;
-                if let Some(arr) = json_value.as_array() {
-                    let mut bytes = Vec::with_capacity(arr.len());
-                    for item in arr {
-                        if let Some(n) = item.as_i64() {
-                            bytes.push(n as u8);
-                        } else if let Some(n) = item.as_u64() {
-                            bytes.push(n as u8);
-                        } else {
-                            return Ok(Param::Text(json_value.to_string()));
-                        }
-                    }
-                    return Ok(Param::Blob(bytes));
-                }
-                Ok(Param::Text(json_value.to_string()))
             } else {
-                let env = Env::from_raw(val.env());
+                // For other objects (typed arrays, plain objects used as positional params),
+                // serialize to JSON string using serde
+                let raw_env = val.value().env;
+                let env = Env::from_raw(raw_env);
                 let json_value: serde_json::Value = env.from_js_value(*val)?;
                 Ok(Param::Text(json_value.to_string()))
             }
@@ -92,11 +81,9 @@ pub fn js_to_param(val: &Unknown) -> Result<Param> {
     }
 }
 
-pub enum ParamsContainer {
-    Positional(Vec<Param>),
-    Named(HashMap<String, Param>),
-}
-
+/// Convert params, optimizing for the common cases:
+/// - Arrays -> positional params with direct element iteration
+/// - Plain objects -> named params with direct property iteration (no serde_json)
 pub fn convert_params_container(_env: &Env, params: Option<Unknown>) -> Result<ParamsContainer> {
     if let Some(p) = params {
         if p.is_array()? {
@@ -107,25 +94,24 @@ pub fn convert_params_container(_env: &Env, params: Option<Unknown>) -> Result<P
                 result.push(js_to_param(&arr.get_element(i)?)?);
             }
             Ok(ParamsContainer::Positional(result))
-        } else if p.get_type()? == ValueType::Object {
-            let env = Env::from_raw(p.env());
-            let json_value: serde_json::Value = env.from_js_value(p)?;
-
-            if let serde_json::Value::Object(map) = json_value {
-                let mut result = HashMap::new();
-                for (key, value) in map.iter() {
-                    let normalized_key =
-                        if key.starts_with('$') || key.starts_with(':') || key.starts_with('@') {
-                            key.to_string()
-                        } else {
-                            format!("${}", key)
-                        };
-                    result.insert(normalized_key, json_value_to_param(value)?);
-                }
-                Ok(ParamsContainer::Named(result))
-            } else {
-                Ok(ParamsContainer::Positional(vec![js_to_param(&p)?]))
+        } else if p.get_type()? == ValueType::Object && !p.is_buffer()? && !p.is_date()? {
+            // Plain object -> named params: iterate properties directly
+            let obj = unsafe { p.cast::<Object>()? };
+            let keys = Object::keys(&obj)?;
+            let mut result = HashMap::with_capacity(keys.len());
+            for key in keys {
+                let val: Unknown = obj.get(key.as_str())?.ok_or_else(|| {
+                    Error::from_reason(format!("Failed to get property: {}", key))
+                })?;
+                let normalized_key =
+                    if key.starts_with('$') || key.starts_with(':') || key.starts_with('@') {
+                        key
+                    } else {
+                        format!("${}", key)
+                    };
+                result.insert(normalized_key, js_to_param(&val)?);
             }
+            Ok(ParamsContainer::Named(result))
         } else {
             Ok(ParamsContainer::Positional(vec![js_to_param(&p)?]))
         }
@@ -134,26 +120,7 @@ pub fn convert_params_container(_env: &Env, params: Option<Unknown>) -> Result<P
     }
 }
 
-fn json_value_to_param(value: &serde_json::Value) -> Result<Param> {
-    match value {
-        serde_json::Value::Null => Ok(Param::Null),
-        serde_json::Value::Bool(b) => Ok(Param::Bool(*b)),
-        serde_json::Value::Number(n) => {
-            if let Some(i) = n.as_i64() {
-                Ok(Param::Int(i))
-            } else if let Some(f) = n.as_f64() {
-                Ok(Param::Float(f))
-            } else {
-                Ok(Param::Float(n.as_f64().unwrap_or(0.0)))
-            }
-        }
-        serde_json::Value::String(s) => Ok(Param::Text(s.clone())),
-        serde_json::Value::Array(_) | serde_json::Value::Object(_) => {
-            Ok(Param::Text(value.to_string()))
-        }
-    }
-}
-
+/// Convert params to positional only (used by Transaction::run)
 pub fn convert_params(_env: &Env, params: Option<Unknown>) -> Result<Vec<Param>> {
     let mut result = Vec::new();
     if let Some(p) = params {
@@ -163,17 +130,6 @@ pub fn convert_params(_env: &Env, params: Option<Unknown>) -> Result<Vec<Param>>
             result.reserve(len as usize);
             for i in 0..len {
                 result.push(js_to_param(&arr.get_element(i)?)?);
-            }
-        } else if p.get_type()? == ValueType::Object {
-            let env = Env::from_raw(p.env());
-            let json_value: serde_json::Value = env.from_js_value(p)?;
-
-            if let serde_json::Value::Object(map) = json_value {
-                for (_key, value) in map.iter() {
-                    result.push(json_value_to_param(value)?);
-                }
-            } else {
-                result.push(js_to_param(&p)?);
             }
         } else {
             result.push(js_to_param(&p)?);

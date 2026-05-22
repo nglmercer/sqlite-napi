@@ -23,8 +23,7 @@
     "baseUrl": ".",
     "paths": {
       "sqlite-napi": ["./index.d.ts"],
-      "sqlite-napi/orm": ["./examples/orm/index.ts"],
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
     },
   },
   "include": [

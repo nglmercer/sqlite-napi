@@ -86,6 +86,7 @@ export {
   index,
   uniqueIndex,
   default_ as defaultVal,
+  references,
   type Column,
   type AnyColumn,
   type ColumnDef,

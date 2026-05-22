@@ -13,12 +13,7 @@ export class InsertQueryBuilder<TTable extends AnySQLiteTable> {
     constructor(
         private db: Queryable,
         private table: TTable,
-        _row?: Partial<InferRow<TTable>>
-    ) {
-        if (row) {
-            this._values = [row];
-        }
-    }
+    ) { }
 
     values(row: Partial<InferRow<TTable>>): this;
     values(rows: Partial<InferRow<TTable>>[]): this;

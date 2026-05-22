@@ -14,7 +14,7 @@ import {
     index,
     sqliteNapi,
     type InferRow,
-} from "./orm/index.ts";
+} from "./orm/index";
 
 // ============================================
 // 1. Schema Definition

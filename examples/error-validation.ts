@@ -14,10 +14,10 @@ import {
     notNull,
     unique,
     references,
-    sqliteNapi
-} from "../orm/index.ts";
+    sqliteNapi,
+    type AnySQLiteTable,
+} from "./orm/index";
 
-// ANSI colors
 const colors = {
     reset: "\x1b[0m",
     bright: "\x1b[1m",
@@ -40,27 +40,28 @@ async function main() {
     const db = new Database(":memory:");
     const adapter = sqliteNapi(db);
 
-    // Enable foreign keys
     db.pragma("foreign_keys", 1);
 
-    // 1. Schema Sync Error (Invalid SQL in definition)
-    // ========================================
     logCase(1, "Invalid Table Definition during Sync");
     const brokenTable = {
+        tableName: "broken",
         name: "broken",
         getSQL: () => "CREATE TABLE broken (id INTEGER PRIMARY,)", // Syntax error
-        getColumns: () => []
-    };
+        getColumns: () => [],
+        getColumn: () => undefined,
+        columns: [],
+        indexes: [],
+        primaryKey: null,
+        columnMap: {},
+        keys: [],
+    } as unknown as AnySQLiteTable;
     try {
-        //@ts-expect-error
         adapter.sync([brokenTable]);
     } catch (e) {
         logError((e as Error).message);
     }
     console.log();
 
-    // 2. Select from Missing Table
-    // ========================================
     logCase(2, "ORM Select from non-existent table");
     const ghostTable = sqliteTable("ghosts", { id: integer("id") });
     try {
@@ -70,8 +71,6 @@ async function main() {
     }
     console.log();
 
-    // 3. Unique Constraint Violation
-    // ========================================
     logCase(3, "ORM Unique Constraint Violation");
     const items = sqliteTable("items", {
         name: notNull(unique(text("name")))
@@ -85,8 +84,6 @@ async function main() {
     }
     console.log();
 
-    // 4. Foreign Key Violation
-    // ========================================
     logCase(4, "ORM Foreign Key Violation");
     const categories = sqliteTable("categories", {
         id: primaryKey(integer("id"))
@@ -104,8 +101,6 @@ async function main() {
     }
     console.log();
 
-    // 5. Update Validation (Empty Set)
-    // ========================================
     logCase(5, "ORM Update with no data");
     try {
         adapter.update(items).set({}).where("name = ?", ["apple"]).run();
@@ -114,19 +109,14 @@ async function main() {
     }
     console.log();
 
-    // 6. Relational Search Error (Missing Column)
-    // ========================================
     logCase(6, "ORM Select with non-existent column");
     try {
-        // Use raw select to simulate a typo or schema mismatch
         adapter.select(products).selectRaw("non_existent_col").all();
     } catch (e) {
         logError((e as Error).message);
     }
     console.log();
 
-    // 7. Join Error (Invalid reference)
-    // ========================================
     logCase(7, "ORM Join with missing column");
     try {
         adapter.select(products)
@@ -137,8 +127,6 @@ async function main() {
     }
     console.log();
 
-    // 8. Delete Validation (Missing WHERE context)
-    // ========================================
     logCase(8, "ORM Delete with invalid SQL in where");
     try {
         adapter.delete(items).where("invalid_syntax_here").run();
@@ -147,20 +135,33 @@ async function main() {
     }
     console.log();
 
-    // 9. Sync Error (Invalid Column for Update)
-    // ========================================
     logCase(9, "ORM Sync adding invalid column");
+    const mockColumn = {
+        name: "new_col",
+        getSQLType: () => "TEXT",
+        getDefinitionSQL: () => "TEXT DEFAULT (", // Syntax error
+        getQuotedName: () => "new_col",
+        toSQL: () => "new_col TEXT DEFAULT (",
+        toString: () => "new_col",
+        isNotNull: false,
+        isPrimaryKey: false,
+        isUnique: false,
+        isAutoIncrement: false,
+        defaultValue: undefined,
+    };
     const invalidUpdateTable = {
+        tableName: "items",
         name: "items",
         getSQL: () => "CREATE TABLE items (name TEXT)",
-        getColumns: () => [{
-            name: "new_col",
-            primaryKey: false,
-            getDefinitionSQL: () => "TEXT DEFAULT (" // Syntax error
-        }]
-    };
+        getColumns: () => [mockColumn],
+        getColumn: () => undefined,
+        columns: [],
+        indexes: [],
+        primaryKey: null,
+        columnMap: {},
+        keys: [],
+    } as unknown as AnySQLiteTable;
     try {
-        //@ts-expect-error
         adapter.sync([invalidUpdateTable]);
     } catch (e) {
         logError((e as Error).message);

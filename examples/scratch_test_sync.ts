@@ -1,5 +1,5 @@
 import { Database } from "../index";
-import { sqliteTable, text, integer, sqliteNapi, primaryKey } from "./orm/index.ts";
+import { sqliteTable, text, integer, sqliteNapi, primaryKey } from "./orm/index";
 
 const db = new Database("test_sync.db");
 const adapter = sqliteNapi(db);

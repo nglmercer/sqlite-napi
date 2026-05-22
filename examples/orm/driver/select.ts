@@ -104,6 +104,8 @@ export class SelectQueryBuilder<
         columns: TCols
     ): SelectQueryBuilder<TTable, { [K in keyof TCols]: TCols[K] extends AnyColumn ? ColumnValue<TCols[K]> : unknown }>;
     select(...columns: string[]): SelectQueryBuilder<TTable, Record<string, unknown>>;
+    select(column: AnyColumn | SQLFragment, ...columns: (AnyColumn | SQLFragment)[]): SelectQueryBuilder<TTable, Record<string, unknown>>;
+    select(...args: (string | AnyColumn | SQLFragment | Record<string, AnyColumn | SQLFragment>)[]): SelectQueryBuilder<TTable, Record<string, unknown>>;
     select(
         ...args: (string | AnyColumn | SQLFragment | Record<string, AnyColumn | SQLFragment>)[]
     ): SelectQueryBuilder<TTable, Record<string, unknown>> {

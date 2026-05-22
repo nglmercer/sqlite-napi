@@ -245,7 +245,10 @@ export function sqliteNapi(
       }
       const builder = new SelectQueryBuilder(queryable);
       if (args.length > 0) {
-        return (builder.select as (...args: any[]) => any)(...args);
+        return builder.select(
+          args[0] as string | AnyColumn | SQLFragment | Record<string, AnyColumn | SQLFragment>,
+          ...(args.slice(1) as (string | AnyColumn | SQLFragment)[]),
+        );
       }
       return builder;
     },

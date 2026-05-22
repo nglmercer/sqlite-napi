@@ -15,7 +15,7 @@ import {
   uniqueIndex,
   sqliteNapi,
   type InferRow,
-} from "./orm/index.ts";
+} from "./orm/index";
 
 // ============================================
 // 1. Schema Definition (Modern Fluent API)

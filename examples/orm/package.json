@@ -1,0 +1,6 @@
+{
+  "name": "sqlite-napi-orm",
+  "type": "module",
+  "main": "./index.ts",
+  "types": "./index.d.ts"
+}

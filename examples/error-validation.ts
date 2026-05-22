@@ -15,7 +15,7 @@ import {
     unique,
     references,
     sqliteNapi
-} from "./core/index";
+} from "../orm/index.ts";
 
 // ANSI colors
 const colors = {

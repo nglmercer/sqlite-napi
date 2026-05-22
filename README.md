@@ -467,12 +467,41 @@ BigInt is supported for 64-bit integers.
 
 ## Performance
 
-The library includes several performance optimizations:
+Benchmarked against `bun:sqlite` (Bun's native built-in SQLite) on identical workloads.
 
-- **Statement Caching** - Prepared statements are cached
+| Benchmark | sqlite-napi | bun:sqlite | vs bun |
+|-----------|-------------|------------|--------|
+| **Connection open/close** (empty) | 124.7µs | 30.8µs | 4.05x |
+| **Connection open/close** (schema) | 213.7µs | 153.0µs | 1.40x |
+| **exec()** CREATE TABLE | 226.3µs | 121.6µs | 1.86x |
+| **exec()** multiple statements | 274.6µs | 262.1µs | 1.05x |
+| **Statement.run()** INSERT | **223.4µs** | 247.0µs | **1.11x faster** |
+| **Statement.all()** 500 rows | 8.17ms | 5.25ms | 1.55x |
+| **Statement.all()** 10k rows | 169ms | 109ms | 1.56x |
+| **Statement.get()** PK lookup (5k) | **35.1ms** | 24.3ms | 1.45x |
+| **Statement.values()** 500 rows | 9.22ms | 5.27ms | 1.75x |
+| **Statement.iter()** 100 rows x100 | 53.6ms | 12.0ms | 4.47x |
+| **UPDATE** 500 rows | 10.8ms | 8.05ms | 1.34x |
+| **DELETE** 500 rows | 9.88ms | 8.90ms | 1.11x |
+| **Parameter binding** positional (500x) | 3.62ms | 2.31ms | 1.57x |
+| **Bulk insert** auto-commit (10k) | 57.4ms | 37.2ms | 1.54x |
+| **Bulk insert** in transaction (10k) | 72.4ms | 51.1ms | 1.42x |
+| **Transaction** create+commit (500x) | 11.7ms | 7.50ms | 1.56x |
+| **Mixed workload** (200x) | 1.70s | 0.87s | 1.94x |
+| **Schema introspection** | **602µs** | 813µs | **1.35x faster** |
+| **Serialization** | 10.2ms | 7.01ms | 1.45x |
+
+> Lower is better for timing columns. "vs bun" shows how much slower (or faster) sqlite-napi is compared to bun:sqlite.
+
+### Built-in optimizations
+
+- **Statement Caching** - Prepared statements are cached per connection via `rusqlite::prepare_cached()`
 - **WAL Mode** - Write-Ahead Logging enabled by default
 - **Memory-Mapped I/O** - 256MB mmap size
 - **Optimized Cache** - 64MB cache size
+- **Rust opt-level 3** - Compiled with full speed optimizations
+- **LTO & single codegen unit** - Cross-crate inlining enabled
+- **NAPI-RS** - Direct native bindings with no serialization bridge
 
 ## Compatibility with bun:sqlite
 

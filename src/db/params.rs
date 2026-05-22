@@ -35,9 +35,7 @@ pub fn js_to_param(val: &Unknown) -> Result<Param> {
         ValueType::Boolean => Ok(Param::Bool(val.coerce_to_bool()?)),
         ValueType::Number => {
             let num = val.coerce_to_number()?;
-            if let Ok(i) = num.get_int32() {
-                Ok(Param::Int(i as i64))
-            } else if let Ok(d) = num.get_double() {
+            if let Ok(d) = num.get_double() {
                 if d.fract() == 0.0
                     && d >= (i64::MIN as f64)
                     && d <= (i64::MAX as f64)
@@ -46,6 +44,8 @@ pub fn js_to_param(val: &Unknown) -> Result<Param> {
                 } else {
                     Ok(Param::Float(d))
                 }
+            } else if let Ok(i) = num.get_int32() {
+                Ok(Param::Int(i as i64))
             } else {
                 Ok(Param::Null)
             }

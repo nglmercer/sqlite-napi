@@ -16,7 +16,8 @@ concurrency:
 
 env:
   RUST_TOOLCHAIN: stable
-  NODE_VERSION: "20"
+  NODE_VERSION: "22.13.1"
+  BUN_VERSION: "1.4.0"
 
 jobs:
   lint:
@@ -39,9 +40,9 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
 
       - name: Install Bun
-        uses: oven-sh/setup-bun@v1
+        uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: ${{ env.BUN_VERSION }}
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@master
@@ -72,7 +73,15 @@ jobs:
             ubuntu-latest-bun-
 
       - name: Install dependencies
-        run: bun install
+        run: bun install --frozen-lockfile
+
+      - name: Build native addon
+        run: bun run build
+
+      - name: Verify ESM and CommonJS loaders
+        run: |
+          node --input-type=module -e "const { Database } = await import('./index.js'); const db = new Database(':memory:'); db.close()"
+          node -e "const { Database } = require('./index.cjs'); const db = new Database(':memory:'); db.close()"
 
       - name: Rust format check
         run: cargo fmt --all -- --check
@@ -80,5 +89,11 @@ jobs:
       - name: Rust linting (clippy)
         run: cargo clippy --all-targets --all-features -- -D warnings
 
+      - name: Rust tests
+        run: cargo test --all-targets --all-features
+
+      - name: Bun tests
+        run: bun test
+
       - name: TypeScript type check
-        run: bun run tsc --noEmit || echo "TypeScript check completed"
+        run: bun run type-check

@@ -58,7 +58,12 @@ pub fn js_to_param(val: &Unknown) -> Result<Param> {
             Ok(Param::Text(s.as_str()?.to_string()))
         }
         ValueType::BigInt => {
-            let (value, _) = unsafe { val.cast::<BigInt>()?.get_i64() };
+            let (value, lossless) = unsafe { val.cast::<BigInt>()?.get_i64() };
+            if !lossless {
+                return Err(Error::from_reason(
+                    "BigInt parameter is outside the signed 64-bit integer range",
+                ));
+            }
             Ok(Param::Int(value))
         }
         ValueType::Object => {

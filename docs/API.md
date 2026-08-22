@@ -152,6 +152,9 @@ const result = db.transactionFn("immediate", [
 console.log(result.changes); // 2
 ```
 
+`changes` is the total number of rows changed by all statements in the
+transaction, not only by the final statement.
+
 ---
 
 ### loadExtension(path: string): void
@@ -447,7 +450,7 @@ interface Migration {
 
 ### createFunction(name: string, func: Function): void
 
-Registers a custom SQL scalar function with the given `name`. The callable is currently a stub — it is invoked but replaces itself with a symbol so SQLite sees a registered function. Async JS callbacks are a planned enhancement.
+Registers a custom SQL scalar function with the given `name`. The supplied JavaScript callback is currently ignored; the registered native stub always returns `NULL`. JavaScript callbacks are a planned enhancement.
 
 ```ts
 db.createFunction("double", (val: unknown) => null);
@@ -461,8 +464,12 @@ db.createFunction("double", (val: unknown) => null);
 
 Registers a custom collation for sorting text values. The comparison function is a stub that delegates to default Rust string comparison. JavaScript callbacks with locale-aware comparison are a planned enhancement.
 
+> Warning: the JavaScript comparator is currently ignored. The registered
+> collation uses Rust's normal lexicographic string comparison until a safe
+> JavaScript callback bridge is implemented.
+
 ```ts
-// Register a case-insensitive collation
+// The comparator is reserved for future callback support.
 db.createCollation("nocase_ci", (a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
 
 // Use it in a table definition
@@ -503,6 +510,8 @@ For PRAGMAs where the "get" call returns multiple rows, the result is an `unknow
 ### close(): void
 
 Flushes the WAL, closes the connection, and marks the object as closed. No-op if called more than once.
+All database operations, including statements created before closing, throw
+after the connection has been closed.
 
 ```ts
 const db = new Database("./app.db");
@@ -737,6 +746,9 @@ const result: TransactionResult = tx.commit();
 // { changes: 1, lastInsertRowid: 1 }
 ```
 
+`changes` is the total number of rows changed since this transaction or
+savepoint was created.
+
 ### rollback(): TransactionResult
 
 Rolls back the active transaction (or rolls back to the savepoint if this `Transaction` was created via `savepoint()`).
@@ -745,6 +757,9 @@ Rolls back the active transaction (or rolls back to the savepoint if this `Trans
 const result: TransactionResult = tx.rollback();
 // { changes: 0, lastInsertRowid: 0 }
 ```
+
+For a rollback, `changes` is measured immediately before the rollback and
+describes the rows that were changed and then discarded.
 
 ### savepoint(name: string): Transaction
 

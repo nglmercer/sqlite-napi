@@ -573,7 +573,7 @@ Returned by `Transaction.commit()` and `Transaction.rollback()`.
 
 ```typescript
 interface TransactionResult {
-  /** Number of rows changed in the transaction */
+  /** Total rows changed since the transaction or savepoint was created */
   changes: number;
 
   /** The ROWID of the last inserted row in the transaction */
@@ -880,8 +880,12 @@ db.createFunction("double", (value) => {
 
 Registers a custom collation (sorting) function.
 
+> **Experimental stub:** the JavaScript comparator is currently ignored. The
+> collation uses Rust's normal lexicographic string ordering, so JavaScript
+> case-insensitive or locale-aware comparison is not available yet.
+
 ```typescript
-//register a case-insensitive collation
+// The comparator is reserved for future callback support.
 db.createCollation("NOCASE", (a, b) => {
   return a.toLowerCase().localeCompare(b.toLowerCase());
 });
@@ -1133,6 +1137,9 @@ db.run("INSERT INTO users (name) VALUES (?)", ["Alice"]);
 db.close();
 
 const closed = db.isClosed(); // true
+
+// Any database operation after close() throws.
+// db.run("SELECT 1");
 ```
 
 ### Database.isClosed()

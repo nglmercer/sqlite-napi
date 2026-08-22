@@ -1,6 +1,17 @@
 use napi::{Error, Status};
 use rusqlite::Error as SqliteError;
 
+/// Return a UTF-8-safe, bounded SQL snippet for error messages.
+pub(crate) fn sql_snippet(sql: &str) -> String {
+    let mut chars = sql.chars();
+    let snippet: String = chars.by_ref().take(100).collect();
+    if chars.next().is_some() {
+        format!("{}...", snippet)
+    } else {
+        snippet
+    }
+}
+
 pub fn to_napi_error(err: SqliteError) -> Error {
     to_napi_error_with_context(err, None)
 }

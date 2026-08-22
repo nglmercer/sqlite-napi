@@ -236,12 +236,21 @@ describe("SQLite NAPI - Schema Migration", () => {
     });
 
     test("handles IF NOT EXISTS syntax", () => {
-      const created = db.createTableIfNotExists(
-        "CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY)",
-      );
+      const sql = "CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY)";
+      const created = db.createTableIfNotExists(sql);
 
       expect(created).toBe(true);
       expect(db.tableExists("users")).toBe(true);
+
+      expect(db.createTableIfNotExists(sql)).toBe(false);
+    });
+
+    test("handles uppercase IF NOT EXISTS syntax", () => {
+      const sql = "CrEaTe TaBlE iF nOt ExIsTs uppercase_users (id INTEGER PRIMARY KEY)";
+
+      expect(db.createTableIfNotExists(sql)).toBe(true);
+      expect(db.createTableIfNotExists(sql)).toBe(false);
+      expect(db.tableExists("uppercase_users")).toBe(true);
     });
 
     test("preserves existing data when table exists", () => {
@@ -267,6 +276,11 @@ describe("SQLite NAPI - Schema Migration", () => {
         "CREATE TABLE `other-users` (id INTEGER PRIMARY KEY)",
       );
       expect(db.tableExists("other-users")).toBe(true);
+
+      db.createTableIfNotExists(
+        'CREATE TABLE IF NOT EXISTS "table with spaces" (id INTEGER PRIMARY KEY)',
+      );
+      expect(db.tableExists("table with spaces")).toBe(true);
     });
   });
 

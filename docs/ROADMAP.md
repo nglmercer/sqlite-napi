@@ -81,14 +81,14 @@ Goal: Build a high-performance SQLite library for Node.js/Bun that mirrors the `
 
 ### Custom SQL Functions
 
-- [x] Implement `database.createFunction(name, fn)` - register custom SQL functions
-- [x] Support scalar functions (basic implementation)
+- [ ] Implement `database.createFunction(name, fn)` - JavaScript callback bridge (currently a NULL-returning stub)
+- [ ] Support scalar functions with JavaScript callbacks (basic SQLite stub exists)
 - [ ] Support aggregate functions (multiple rows to single value) - requires async callback support
 - [ ] Support window functions - requires async callback support
 
 ### Custom Collations
 
-- [x] Implement `database.createCollation(name, compareFn)` - custom sorting rules
+- [ ] Implement `database.createCollation(name, compareFn)` - JavaScript callback bridge (currently Rust ordering stub)
 
 ### Additional Features
 
@@ -115,8 +115,8 @@ Goal: Build a high-performance SQLite library for Node.js/Bun that mirrors the `
 | Column metadata    | `stmt.columns`                          | `stmt.columns`                           | ✅     |
 | Statement source   | `stmt.source`                           | `stmt.source`                            | ✅     |
 | Transaction state  | `db.inTransaction`                      | `db.inTransaction()`                     | ✅     |
-| Custom functions   | `db.createFunction()`                   | `db.createFunction()`                    | ✅ ⚠️  |
-| Custom collations  | `db.createCollation()`                  | `db.createCollation()`                   | ✅ ⚠️  |
+| Custom functions   | `db.createFunction()`                   | `db.createFunction()`                    | ⚠️ stub |
+| Custom collations  | `db.createCollation()`                  | `db.createCollation()`                   | ⚠️ stub |
 | Pragma             | `db.pragma()`                           | `db.pragma()`                            | ✅     |
 | Database path      | `db.filename`                           | `db.filename`                            | ✅     |
 | Close connection   | `db.close()`                            | `db.close()`                             | ✅     |

@@ -1,37 +1,39 @@
 use crate::db::convert_params;
 use crate::db::convert_params_container;
 use crate::db::sqlite_to_json;
-use crate::db::Iter;
-use crate::db::Statement;
-use crate::error::to_napi_error;
+use crate::db::{ConnectionStore, Iter, Statement};
+use crate::error::{sql_snippet, to_napi_error};
 use crate::models::{QueryResult, TransactionResult};
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
-use rusqlite::{Connection, ToSql};
+use rusqlite::ToSql;
 use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 #[napi]
 pub struct Transaction {
-    conn: Arc<Mutex<Connection>>,
+    conn: Arc<ConnectionStore>,
     in_transaction: Arc<AtomicBool>,
     #[allow(dead_code)]
     committed: bool,
     savepoint_name: Option<String>,
+    start_total_changes: u64,
 }
 
 impl Transaction {
     pub(crate) fn new(
-        conn: Arc<Mutex<Connection>>,
+        conn: Arc<ConnectionStore>,
         in_transaction: Arc<AtomicBool>,
         committed: bool,
         savepoint_name: Option<String>,
+        start_total_changes: u64,
     ) -> Self {
         Transaction {
             conn,
             in_transaction,
             committed,
             savepoint_name,
+            start_total_changes,
         }
     }
 }
@@ -40,21 +42,14 @@ impl Transaction {
 impl Transaction {
     #[napi]
     pub fn run(&self, env: Env, sql: String, params: Option<Unknown>) -> Result<QueryResult> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| Error::from_reason("DB Lock failed"))?;
+        let conn = self.conn.lock()?;
 
         let rusqlite_params = convert_params(&env, params)?;
         let params_refs: Vec<&dyn ToSql> =
             rusqlite_params.iter().map(|p| p as &dyn ToSql).collect();
 
         conn.execute(&sql, params_refs.as_slice()).map_err(|e| {
-            let snippet = if sql.len() > 100 {
-                format!("{}...", &sql[..100])
-            } else {
-                sql.clone()
-            };
+            let snippet = sql_snippet(&sql);
             crate::error::to_napi_error_with_context(e, Some(&format!("Query failed: {}", snippet)))
         })?;
 
@@ -66,10 +61,9 @@ impl Transaction {
 
     #[napi]
     pub fn commit(&self) -> Result<TransactionResult> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| Error::from_reason("DB Lock failed"))?;
+        let conn = self.conn.lock()?;
+
+        let changes = crate::db::changes_since(&conn, self.start_total_changes);
 
         if let Some(ref savepoint) = self.savepoint_name {
             conn.execute(&format!("RELEASE SAVEPOINT {}", savepoint), [])
@@ -81,17 +75,16 @@ impl Transaction {
         }
 
         Ok(TransactionResult {
-            changes: conn.changes() as u32,
+            changes,
             last_insert_rowid: conn.last_insert_rowid(),
         })
     }
 
     #[napi]
     pub fn rollback(&self) -> Result<TransactionResult> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| Error::from_reason("DB Lock failed"))?;
+        let conn = self.conn.lock()?;
+
+        let changes = crate::db::changes_since(&conn, self.start_total_changes);
 
         if let Some(ref savepoint) = self.savepoint_name {
             conn.execute(&format!("ROLLBACK TO SAVEPOINT {}", savepoint), [])
@@ -105,31 +98,31 @@ impl Transaction {
         }
 
         Ok(TransactionResult {
-            changes: conn.changes() as u32,
+            changes,
             last_insert_rowid: conn.last_insert_rowid(),
         })
     }
 
     #[napi]
     pub fn savepoint(&self, name: String) -> Result<Transaction> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| Error::from_reason("DB Lock failed"))?;
+        let conn = self.conn.lock()?;
 
         conn.execute(&format!("SAVEPOINT {}", name), [])
             .map_err(to_napi_error)?;
+        let start_total_changes = conn.total_changes();
 
         Ok(Transaction::new(
             self.conn.clone(),
             self.in_transaction.clone(),
             false,
             Some(name),
+            start_total_changes,
         ))
     }
 
     #[napi]
     pub fn query(&self, sql: String) -> Result<Statement> {
+        self.conn.ensure_open()?;
         Ok(Statement::new(sql, self.conn.clone()))
     }
 
@@ -140,10 +133,7 @@ impl Transaction {
         sql: String,
         params: Option<Unknown>,
     ) -> Result<Vec<serde_json::Value>> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| Error::from_reason("DB Lock failed"))?;
+        let conn = self.conn.lock()?;
 
         let mut stmt = conn.prepare_cached(&sql).map_err(|e| {
             crate::error::to_napi_error_with_context(e, Some(&format!("Prepare failed: {}", sql)))
@@ -187,9 +177,8 @@ impl Transaction {
             )
         })? {
             let mut map = serde_json::Map::with_capacity(column_count);
-            for i in 0..column_count {
-                let val = sqlite_to_json(&row, i).map_err(to_napi_error)?;
-                let name = &column_names[i];
+            for (i, name) in column_names.iter().take(column_count).enumerate() {
+                let val = sqlite_to_json(row, i).map_err(to_napi_error)?;
                 map.insert(name.clone(), val);
             }
             results.push(serde_json::Value::Object(map));
@@ -204,10 +193,7 @@ impl Transaction {
         sql: String,
         params: Option<Unknown>,
     ) -> Result<Option<serde_json::Value>> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| Error::from_reason("DB Lock failed"))?;
+        let conn = self.conn.lock()?;
 
         let mut stmt = conn.prepare_cached(&sql).map_err(|e| {
             crate::error::to_napi_error_with_context(e, Some(&format!("Prepare failed: {}", sql)))
@@ -236,9 +222,8 @@ impl Transaction {
 
         if let Some(row) = rows.next().map_err(to_napi_error)? {
             let mut map = serde_json::Map::with_capacity(column_count);
-            for i in 0..column_count {
-                let val = sqlite_to_json(&row, i).map_err(to_napi_error)?;
-                let name = &column_names[i];
+            for (i, name) in column_names.iter().take(column_count).enumerate() {
+                let val = sqlite_to_json(row, i).map_err(to_napi_error)?;
                 map.insert(name.clone(), val);
             }
             Ok(Some(serde_json::Value::Object(map)))
@@ -254,10 +239,7 @@ impl Transaction {
         sql: String,
         params: Option<Unknown>,
     ) -> Result<Vec<serde_json::Value>> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| Error::from_reason("DB Lock failed"))?;
+        let conn = self.conn.lock()?;
 
         let mut stmt = conn.prepare_cached(&sql).map_err(|e| {
             crate::error::to_napi_error_with_context(e, Some(&format!("Prepare failed: {}", sql)))
@@ -296,7 +278,7 @@ impl Transaction {
         })? {
             let mut row_arr = Vec::with_capacity(column_count);
             for i in 0..column_count {
-                let val = sqlite_to_json(&row, i).map_err(to_napi_error)?;
+                let val = sqlite_to_json(row, i).map_err(to_napi_error)?;
                 row_arr.push(val);
             }
             results.push(serde_json::Value::Array(row_arr));
@@ -306,10 +288,7 @@ impl Transaction {
 
     #[napi]
     pub fn iter(&self, env: Env, sql: String, params: Option<Unknown>) -> Result<Iter> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| Error::from_reason("DB Lock failed"))?;
+        let conn = self.conn.lock()?;
         let pc = convert_params_container(&env, params)?;
 
         let mut stmt = conn.prepare_cached(&sql).map_err(|e| {
@@ -348,7 +327,7 @@ impl Transaction {
             crate::error::to_napi_error_with_context(e, Some(&format!("Fetch failed: {}", sql)))
         })? {
             let mut map = serde_json::Map::with_capacity(count);
-            for i in 0..count {
+            for (i, name) in names.iter().take(count).enumerate() {
                 let val = match row.get_ref(i).map_err(to_napi_error)? {
                     rusqlite::types::ValueRef::Null => serde_json::Value::Null,
                     rusqlite::types::ValueRef::Integer(v) => serde_json::Value::Number(v.into()),
@@ -361,7 +340,7 @@ impl Transaction {
                         base64::Engine::encode(&base64::engine::general_purpose::STANDARD, v),
                     ),
                 };
-                map.insert(names[i].clone(), val);
+                map.insert(name.clone(), val);
             }
             result_rows.push(serde_json::Value::Object(map));
         }
@@ -371,16 +350,9 @@ impl Transaction {
 
     #[napi]
     pub fn exec(&self, sql: String) -> Result<QueryResult> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| Error::from_reason("DB Lock failed"))?;
+        let conn = self.conn.lock()?;
         conn.execute_batch(&sql).map_err(|e| {
-            let snippet = if sql.len() > 100 {
-                format!("{}...", &sql[..100])
-            } else {
-                sql.clone()
-            };
+            let snippet = sql_snippet(&sql);
             crate::error::to_napi_error_with_context(
                 e,
                 Some(&format!("Execute failed: {}", snippet)),

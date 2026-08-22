@@ -29,20 +29,29 @@
     "bun": ">=1.0.0"
   },
   "type": "module",
-  "main": "index.js",
-  "types": "index.d.ts",
+  "main": "./index.cjs",
+  "module": "./index.js",
+  "types": "./index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "import": "./index.js",
+      "require": "./index.cjs",
+      "default": "./index.js"
+    }
+  },
   "files": [
-    "dist/",
     "index.js",
+    "index.cjs",
     "index.d.ts",
-    "**.node",
+    "*.node",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
-    "build": "napi build --platform --release",
+    "build": "bun ./scripts/build.ts",
     "build:all": "bun ./scripts/build_multiplatform.ts",
-    "build:debug": "napi build --platform",
+    "build:debug": "bun ./scripts/build.ts --debug",
     "clean": "napi clean && cargo clean",
     "test": "bun test",
     "bench": "bun run benchmarks/all.ts",
@@ -52,11 +61,11 @@
     "lint": "rustup run stable cargo clippy -- -D warnings"
   },
   "devDependencies": {
-    "@napi-rs/cli": "^3.6.2",
-    "@types/bun": "^1.1.12",
-    "commander": "^14.0.3",
-    "tsx": "^4.21.0",
-    "typescript": "^5.6.2"
+    "@napi-rs/cli": "^3.8.6",
+    "@types/bun": "^1.4.0",
+    "commander": "^15.0.0",
+    "tsx": "^4.23.12",
+    "typescript": "^7.0.2"
   },
   "peerDependencies": {
     "bun": ">=1.0.0"
@@ -71,5 +80,6 @@
       "x86_64-unknown-linux-gnu",
       "aarch64-unknown-linux-gnu"
     ]
-  }
+  },
+  "packageManager": "bun@1.4.0"
 }

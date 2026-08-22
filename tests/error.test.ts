@@ -124,4 +124,10 @@ describe("SQLite NAPI - Error Handling", () => {
     expect(errorMessage.length).toBeGreaterThan(0);
     expect(errorMessage.toLowerCase()).toContain("no such table");
   });
+
+  test("handles long Unicode SQL in error context without panicking", () => {
+    const sql = `${"é".repeat(100)} INVALID SQL`;
+
+    expect(() => db.exec(sql)).toThrow();
+  });
 });

@@ -1,5 +1,5 @@
 import { $ } from "bun";
-import { existsSync } from "fs";
+import { existsSync, readdirSync } from "fs";
 import { join } from "path";
 import os from "os";
 
@@ -98,14 +98,15 @@ const results: { target: string; success: boolean }[] = [];
 
 for (const cfg of targets) {
     const { target } = cfg;
+    const outputDir = join("dist", target);
     console.log(`\n🛠️  Building for ${target}...`);
 
     try {
         if ("native" in cfg && cfg.native) {
-            await $`npx napi build --release --platform`;
+            await $`npx napi build --release --target ${target} --platform --no-js --output-dir ${outputDir}`;
 
         } else if ("napiCross" in cfg && cfg.napiCross) {
-            await $`npx napi build --release --target ${target} --use-napi-cross --platform`;
+            await $`npx napi build --release --target ${target} --use-napi-cross --platform --no-js --output-dir ${outputDir}`;
 
         } else if ("xwin" in cfg && cfg.xwin) {
             // Windows MSVC cross-compilation
@@ -115,17 +116,22 @@ for (const cfg of targets) {
                 XWIN_ARCH: isArm ? "aarch64" : "x86_64" 
             };
             // Use --cross-compile which invokes cargo-xwin
-            await $`npx napi build --release --target ${target} --cross-compile --platform`.env(env);
+            await $`npx napi build --release --target ${target} --cross-compile --platform --no-js --output-dir ${outputDir}`.env(env);
 
         } else if ("apple" in cfg && cfg.apple) {
             if (sdkRoot) {
                 const env = { ...process.env, SDKROOT: sdkRoot };
-                await $`npx napi build --release --target ${target} --cross-compile --platform`.env(env);
+                await $`npx napi build --release --target ${target} --cross-compile --platform --no-js --output-dir ${outputDir}`.env(env);
             } else {
                 console.warn(`  ⚠️  Skipping ${target}: no macOS SDK`);
                 results.push({ target, success: false });
                 continue;
             }
+        }
+
+        const hasNativeArtifact = existsSync(outputDir) && readdirSync(outputDir).some((file) => file.endsWith(".node"));
+        if (!hasNativeArtifact) {
+            throw new Error(`No native artifact was produced in ${outputDir}`);
         }
 
         console.log(`✅ Success: ${target}`);

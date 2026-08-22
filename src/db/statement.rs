@@ -2,8 +2,10 @@ use crate::error::to_napi_error;
 use crate::models::QueryResult;
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
-use rusqlite::{Connection, ToSql};
-use std::sync::{Arc, Mutex};
+use rusqlite::ToSql;
+use std::sync::Arc;
+
+use super::ConnectionStore;
 
 #[napi(object)]
 pub struct ColumnInfo {
@@ -15,7 +17,7 @@ pub struct ColumnInfo {
 #[napi]
 pub struct Statement {
     sql: String,
-    conn: Arc<Mutex<Connection>>,
+    conn: Arc<ConnectionStore>,
 }
 
 #[napi]
@@ -30,7 +32,7 @@ fn params_to_refs(params: &[crate::db::Param]) -> Vec<&dyn ToSql> {
 }
 
 impl Statement {
-    pub(crate) fn new(sql: String, conn: Arc<Mutex<Connection>>) -> Self {
+    pub(crate) fn new(sql: String, conn: Arc<ConnectionStore>) -> Self {
         Statement { sql, conn }
     }
 }
@@ -51,7 +53,7 @@ fn build_row_map(
     column_count: usize,
 ) -> Result<serde_json::Value> {
     let mut map = serde_json::Map::with_capacity(column_count);
-    for i in 0..column_count {
+    for (i, name) in column_names.iter().take(column_count).enumerate() {
         let val = match row.get_ref(i).map_err(to_napi_error)? {
             rusqlite::types::ValueRef::Null => serde_json::Value::Null,
             rusqlite::types::ValueRef::Integer(v) => serde_json::Value::Number(v.into()),
@@ -64,7 +66,7 @@ fn build_row_map(
                 base64::Engine::encode(&base64::engine::general_purpose::STANDARD, v),
             ),
         };
-        map.insert(column_names[i].clone(), val);
+        map.insert(name.clone(), val);
     }
     Ok(serde_json::Value::Object(map))
 }
@@ -93,10 +95,7 @@ fn build_row_array(row: &rusqlite::Row, column_count: usize) -> Result<serde_jso
 impl Statement {
     #[napi]
     pub fn all(&self, env: Env, params: Option<Unknown>) -> Result<serde_json::Value> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| Error::from_reason("DB Lock failed"))?;
+        let conn = self.conn.lock()?;
         let pc = crate::db::convert_params_container(&env, params)?;
 
         let mut stmt = conn.prepare_cached(&self.sql).map_err(|e| {
@@ -140,17 +139,14 @@ impl Statement {
                 Some(&format!("Fetch failed: {}", self.sql)),
             )
         })? {
-            results.push(build_row_map(&row, &names, count)?);
+            results.push(build_row_map(row, &names, count)?);
         }
         Ok(serde_json::Value::Array(results))
     }
 
     #[napi]
     pub fn get(&self, env: Env, params: Option<Unknown>) -> Result<serde_json::Value> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| Error::from_reason("DB Lock failed"))?;
+        let conn = self.conn.lock()?;
         let pc = crate::db::convert_params_container(&env, params)?;
 
         let mut stmt = conn.prepare_cached(&self.sql).map_err(|e| {
@@ -188,17 +184,14 @@ impl Statement {
         };
 
         match rows.next().map_err(to_napi_error)? {
-            Some(row) => build_row_map(&row, &names, count),
+            Some(row) => build_row_map(row, &names, count),
             None => Ok(serde_json::Value::Null),
         }
     }
 
     #[napi]
     pub fn run(&self, env: Env, params: Option<Unknown>) -> Result<QueryResult> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| Error::from_reason("DB Lock failed"))?;
+        let conn = self.conn.lock()?;
         let pc = crate::db::convert_params_container(&env, params)?;
 
         let changes = match &pc {
@@ -233,10 +226,7 @@ impl Statement {
 
     #[napi]
     pub fn values(&self, env: Env, params: Option<Unknown>) -> Result<serde_json::Value> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| Error::from_reason("DB Lock failed"))?;
+        let conn = self.conn.lock()?;
         let pc = crate::db::convert_params_container(&env, params)?;
 
         let mut stmt = conn.prepare_cached(&self.sql).map_err(|e| {
@@ -279,7 +269,7 @@ impl Statement {
                 Some(&format!("Fetch failed: {}", self.sql)),
             )
         })? {
-            results.push(build_row_array(&row, count)?);
+            results.push(build_row_array(row, count)?);
         }
         Ok(serde_json::Value::Array(results))
     }
@@ -291,10 +281,7 @@ impl Statement {
 
     #[napi]
     pub fn iter(&self, env: Env, params: Option<Unknown>) -> Result<Iter> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| Error::from_reason("DB Lock failed"))?;
+        let conn = self.conn.lock()?;
         let pc = crate::db::convert_params_container(&env, params)?;
 
         let mut stmt = conn.prepare_cached(&self.sql).map_err(|e| {
@@ -331,7 +318,7 @@ impl Statement {
                 Some(&format!("Fetch failed: {}", self.sql)),
             )
         })? {
-            result_rows.push(build_row_map(&row, &names, count)?);
+            result_rows.push(build_row_map(row, &names, count)?);
         }
 
         Ok(Iter::new(result_rows, names))
@@ -339,10 +326,7 @@ impl Statement {
 
     #[napi]
     pub fn columns(&self) -> Result<Vec<ColumnInfo>> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| Error::from_reason("DB Lock failed"))?;
+        let conn = self.conn.lock()?;
         let s = conn.prepare_cached(&self.sql).map_err(|e| {
             crate::error::to_napi_error_with_context(
                 e,

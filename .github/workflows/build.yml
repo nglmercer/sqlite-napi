@@ -18,7 +18,8 @@ concurrency:
 
 env:
   RUST_TOOLCHAIN: stable
-  NODE_VERSION: "20"
+  NODE_VERSION: "22.13.1"
+  BUN_VERSION: "1.4.0"
   NAPI_VERSION: "3"
 
 jobs:
@@ -52,8 +53,8 @@ jobs:
             target: x86_64-pc-windows-msvc
             artifact_suffix: win32-x64
           - os: windows-latest
-            target: i686-pc-windows-msvc
-            artifact_suffix: win32-ia32
+            target: aarch64-pc-windows-msvc
+            artifact_suffix: win32-arm64
 
     steps:
       - name: Checkout code
@@ -70,15 +71,16 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
           targets: ${{ matrix.target }}
-
-      - name: Add target (Linux ARM64)
-        if: matrix.target == 'aarch64-unknown-linux-gnu'
-        run: rustup target add aarch64-unknown-linux-gnu
 
       - name: Cache Rust dependencies
         uses: actions/cache@v4
@@ -91,11 +93,11 @@ jobs:
           restore-keys: |
             ${{ matrix.os }}-cargo-
 
-      - name: Install npm dependencies
-        run: npm install
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
 
       - name: Build
-        run: npm run build -- --target ${{ matrix.target }}
+        run: bun run build -- --target ${{ matrix.target }} --output-dir dist/${{ matrix.target }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
@@ -103,11 +105,29 @@ jobs:
           CXX_aarch64_unknown_linux_gnu: aarch64-linux-gnu-g++
           AR_aarch64_unknown_linux_gnu: aarch64-linux-gnu-ar
 
+      - name: Verify native artifact
+        if: matrix.os != 'windows-latest'
+        run: |
+          ls -la dist/${{ matrix.target }}/
+          test -n "$(find dist/${{ matrix.target }} -name '*.node' -print -quit)"
+
+      - name: Verify native artifact (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $files = Get-ChildItem -Path "dist/${{ matrix.target }}" -Filter "*.node" -Force
+          if ($files.Count -eq 0) {
+            Write-Error "ERROR: no .node file found!"
+            exit 1
+          }
+          $files | Format-List
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: bindings-${{ matrix.artifact_suffix }}
           path: |
-            dist/${{ matrix.artifact_suffix }}/*.node
+            dist/${{ matrix.target }}/*.node
             package.json
+          if-no-files-found: error
           retention-days: 7

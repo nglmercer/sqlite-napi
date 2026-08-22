@@ -12,7 +12,8 @@ concurrency:
 
 env:
   RUST_TOOLCHAIN: stable
-  NODE_VERSION: "20"
+  NODE_VERSION: "22.13.1"
+  BUN_VERSION: "1.4.0"
   NAPI_VERSION: "3"
 
 jobs:
@@ -46,8 +47,8 @@ jobs:
             target: x86_64-pc-windows-msvc
             artifact_suffix: win32-x64
           - os: windows-latest
-            target: i686-pc-windows-msvc
-            artifact_suffix: win32-ia32
+            target: aarch64-pc-windows-msvc
+            artifact_suffix: win32-arm64
 
     steps:
       - name: Checkout code
@@ -63,6 +64,11 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@master
@@ -81,11 +87,11 @@ jobs:
           restore-keys: |
             ${{ matrix.os }}-cargo-
 
-      - name: Install npm dependencies
-        run: npm install
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
 
       - name: Build
-        run: npm run build -- --target ${{ matrix.target }} --output-dir dist/${{ matrix.target }}
+        run: bun run build -- --target ${{ matrix.target }} --output-dir dist/${{ matrix.target }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
@@ -172,7 +178,7 @@ jobs:
             dist/bindings-darwin-x64/*.node
             dist/bindings-darwin-arm64/*.node
             dist/bindings-win32-x64/*.node
-            dist/bindings-win32-ia32/*.node
+            dist/bindings-win32-arm64/*.node
             dist/checksums.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

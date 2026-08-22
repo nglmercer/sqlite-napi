@@ -94,6 +94,16 @@ describe("SQLite NAPI - Database Properties", () => {
 
       expect(db.isClosed()).toBe(true);
     });
+
+    test("rejects database operations after close", () => {
+      const db = new Database(":memory:");
+      const statement = db.query("SELECT 1 AS value");
+      db.close();
+
+      expect(() => db.query("SELECT 2")).toThrow(/closed/i);
+      expect(() => db.run("SELECT 1")).toThrow(/closed/i);
+      expect(() => statement.get()).toThrow(/closed/i);
+    });
   });
 
   describe("inTransaction property", () => {

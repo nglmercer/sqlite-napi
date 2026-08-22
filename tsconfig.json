@@ -20,10 +20,8 @@
     "resolveJsonModule": true,
     "declaration": true,
     "declarationMap": false,
-    "baseUrl": ".",
     "paths": {
-      "sqlite-napi": ["./index.d.ts"],
-      "@/*": ["./src/*"],
+      "sqlite-napi": ["./index.d.ts"]
     },
   },
   "include": [

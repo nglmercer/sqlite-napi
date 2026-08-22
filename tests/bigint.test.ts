@@ -194,6 +194,24 @@ describe("SQLite NAPI - BigInt Support", () => {
       expect(row).toBeDefined();
     });
 
+    test("rejects BigInt above the signed 64-bit range", () => {
+      expect(() => {
+        db.run("INSERT INTO big_numbers (big_val, name) VALUES (?, ?)", [
+          BigInt("9223372036854775808"),
+          "too_large",
+        ]);
+      }).toThrow(/signed 64-bit/);
+    });
+
+    test("rejects BigInt below the signed 64-bit range", () => {
+      expect(() => {
+        db.run("INSERT INTO big_numbers (big_val, name) VALUES (?, ?)", [
+          BigInt("-9223372036854775809"),
+          "too_small",
+        ]);
+      }).toThrow(/signed 64-bit/);
+    });
+
     test("BigInt arithmetic in SQL", () => {
       db.run("INSERT INTO big_numbers (big_val, name) VALUES (?, ?)", [
         BigInt("1000000000000"),

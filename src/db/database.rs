@@ -1,7 +1,7 @@
 //! Database module - provides the Database struct for SQLite connections
 
 use crate::db::convert_params_container;
-use crate::error::to_napi_error;
+use crate::error::{sql_snippet, to_napi_error};
 use crate::models::{Migration, QueryResult};
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
@@ -14,8 +14,8 @@ use std::collections::HashMap;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
-use super::Statement;
 use super::Transaction;
+use super::{ConnectionStore, Statement};
 
 /// Database options for connection configuration
 #[napi(object)]
@@ -31,7 +31,7 @@ pub struct DatabaseOptions {
 /// Database connection struct - represents an SQLite database connection
 #[napi]
 pub struct Database {
-    conn: Arc<Mutex<Connection>>,
+    conn: Arc<ConnectionStore>,
     in_transaction: Arc<AtomicBool>,
     closed: Arc<AtomicBool>,
     filename: String,
@@ -44,60 +44,93 @@ pub struct Database {
 impl Database {
     /// Extract table name from CREATE TABLE SQL
     fn extract_table_name(sql: &str) -> Result<String> {
-        let sql_lower = sql.to_lowercase();
-        if let Some(idx) = sql_lower.find("create table") {
-            let after_create = &sql[idx + 12..];
-            let sql_trimmed = after_create.trim();
+        fn consume_keyword<'a>(input: &'a str, keyword: &str) -> Option<&'a str> {
+            let input = input.trim_start();
+            let candidate = input.get(..keyword.len())?;
+            if !candidate.eq_ignore_ascii_case(keyword) {
+                return None;
+            }
 
-            // Handle IF NOT EXISTS
-            let name_start = if sql_trimmed.starts_with("if not exists") {
-                let after_if = sql_trimmed[12..].trim();
-                after_if
-                    .find(|c: char| !c.is_whitespace())
-                    .map(|i| i + 12)
-                    .unwrap_or(0)
-            } else {
-                0
-            };
+            let next = input[keyword.len()..].chars().next();
+            if next.is_some_and(|character| character.is_ascii_alphanumeric() || character == '_') {
+                return None;
+            }
 
-            let remaining = &sql_trimmed[name_start..];
-            let mut end_idx = 0;
-            let mut paren_depth = 0;
-            let mut in_name = true;
+            Some(&input[keyword.len()..])
+        }
 
-            for (i, c) in remaining.chars().enumerate() {
-                if in_name && (c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '(') {
-                    if c == '(' {
-                        paren_depth = 1;
-                        in_name = false;
-                    } else {
-                        end_idx = i;
-                        break;
-                    }
-                } else if !in_name && c == '(' {
-                    paren_depth += 1;
-                } else if !in_name && c == ')' {
-                    paren_depth -= 1;
-                    if paren_depth == 0 {
-                        end_idx = i;
-                        break;
+        fn consume_identifier(input: &str) -> Option<(&str, &str)> {
+            let input = input.trim_start();
+            let mut characters = input.char_indices();
+            let (_, first) = characters.next()?;
+
+            if matches!(first, '"' | '`' | '[') {
+                let closing = if first == '[' { ']' } else { first };
+                for (index, character) in characters {
+                    if character == closing {
+                        let end = index + character.len_utf8();
+                        return Some((&input[..end], &input[end..]));
                     }
                 }
+                return None;
             }
 
-            if end_idx == 0 {
-                end_idx = remaining.len();
-            }
-
-            let table_name = remaining[..end_idx].trim();
-
-            // Remove quotes if present
-            let table_name = table_name.trim_matches('"').trim_matches('`');
-
-            Ok(table_name.to_string())
-        } else {
-            Err(Error::from_reason("Invalid CREATE TABLE SQL"))
+            let end = input
+                .char_indices()
+                .find(|(index, character)| {
+                    *index > 0
+                        && (character.is_whitespace() || *character == '.' || *character == '(')
+                })
+                .map(|(index, _)| index)
+                .unwrap_or(input.len());
+            Some((&input[..end], &input[end..]))
         }
+
+        fn unquote_identifier(identifier: &str) -> String {
+            if identifier.len() < 2 {
+                return identifier.to_string();
+            }
+
+            let first = identifier.as_bytes()[0] as char;
+            let last = identifier.as_bytes()[identifier.len() - 1] as char;
+            let matching_quote = (first == '"' && last == '"')
+                || (first == '`' && last == '`')
+                || (first == '[' && last == ']');
+            if !matching_quote {
+                return identifier.to_string();
+            }
+
+            let inner = &identifier[1..identifier.len() - 1];
+            match first {
+                '"' => inner.replace("\"\"", "\""),
+                '`' => inner.replace("``", "`"),
+                '[' => inner.to_string(),
+                _ => inner.to_string(),
+            }
+        }
+
+        let mut remaining = consume_keyword(sql, "CREATE")
+            .and_then(|rest| consume_keyword(rest, "TABLE"))
+            .ok_or_else(|| Error::from_reason("Invalid CREATE TABLE SQL"))?;
+
+        if let Some(rest) = consume_keyword(remaining, "IF") {
+            remaining = consume_keyword(rest, "NOT")
+                .and_then(|rest| consume_keyword(rest, "EXISTS"))
+                .ok_or_else(|| Error::from_reason("Invalid CREATE TABLE IF NOT EXISTS SQL"))?;
+        }
+
+        let (first_identifier, remainder) = consume_identifier(remaining)
+            .ok_or_else(|| Error::from_reason("CREATE TABLE statement has no table name"))?;
+        let remainder = remainder.trim_start();
+        let raw_name = if let Some(after_dot) = remainder.strip_prefix('.') {
+            consume_identifier(after_dot)
+                .map(|(identifier, _)| identifier)
+                .ok_or_else(|| Error::from_reason("CREATE TABLE statement has no table name"))?
+        } else {
+            first_identifier
+        };
+
+        Ok(unquote_identifier(raw_name))
     }
 }
 
@@ -155,7 +188,7 @@ impl Database {
         }
 
         Ok(Database {
-            conn: Arc::new(Mutex::new(conn)),
+            conn: Arc::new(ConnectionStore::new(conn)),
             in_transaction: Arc::new(AtomicBool::new(false)),
             closed: Arc::new(AtomicBool::new(false)),
             filename: path,
@@ -169,16 +202,14 @@ impl Database {
     pub fn query(&self, sql: String) -> Result<Statement> {
         // Don't validate SQL here - let it fail at execution time if invalid
         // This allows getting stmt.source() even for queries referencing non-existent tables
+        self.conn.ensure_open()?;
         Ok(Statement::new(sql, self.conn.clone()))
     }
 
     /// Execute a SQL statement directly
     #[napi]
     pub fn run(&self, env: Env, sql: String, params: Option<Unknown>) -> Result<QueryResult> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| Error::from_reason("DB Lock failed"))?;
+        let conn = self.conn.lock()?;
 
         let params_container = convert_params_container(&env, params)?;
 
@@ -187,11 +218,7 @@ impl Database {
                 let params_refs: Vec<&dyn ToSql> =
                     positional_params.iter().map(|p| p as &dyn ToSql).collect();
                 conn.execute(&sql, params_refs.as_slice()).map_err(|e| {
-                    let snippet = if sql.len() > 100 {
-                        format!("{}...", &sql[..100])
-                    } else {
-                        sql.clone()
-                    };
+                    let snippet = sql_snippet(&sql);
                     crate::error::to_napi_error_with_context(
                         e,
                         Some(&format!("Query failed: {}", snippet)),
@@ -205,11 +232,7 @@ impl Database {
                 }
                 conn.execute(&sql, named_params_refs.as_slice())
                     .map_err(|e| {
-                        let snippet = if sql.len() > 100 {
-                            format!("{}...", &sql[..100])
-                        } else {
-                            sql.clone()
-                        };
+                        let snippet = sql_snippet(&sql);
                         crate::error::to_napi_error_with_context(
                             e,
                             Some(&format!("Query failed: {}", snippet)),
@@ -227,16 +250,9 @@ impl Database {
     /// Execute SQL directly (without callback)
     #[napi]
     pub fn exec(&self, sql: String) -> Result<QueryResult> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| Error::from_reason("DB Lock failed"))?;
+        let conn = self.conn.lock()?;
         conn.execute_batch(&sql).map_err(|e| {
-            let snippet = if sql.len() > 100 {
-                format!("{}...", &sql[..100])
-            } else {
-                sql.clone()
-            };
+            let snippet = sql_snippet(&sql);
             crate::error::to_napi_error_with_context(
                 e,
                 Some(&format!("Execute failed: {}", snippet)),
@@ -251,10 +267,7 @@ impl Database {
     /// Begin a transaction
     #[napi]
     pub fn transaction(&self, mode: Option<String>) -> Result<Transaction> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| Error::from_reason("DB Lock failed"))?;
+        let conn = self.conn.lock()?;
         let mode_str = match mode.as_deref() {
             Some("immediate") => "IMMEDIATE",
             Some("exclusive") => "EXCLUSIVE",
@@ -262,6 +275,7 @@ impl Database {
         };
         conn.execute(&format!("BEGIN {}", mode_str), [])
             .map_err(to_napi_error)?;
+        let start_total_changes = conn.total_changes();
         self.in_transaction
             .store(true, std::sync::atomic::Ordering::SeqCst);
         Ok(Transaction::new(
@@ -269,6 +283,7 @@ impl Database {
             self.in_transaction.clone(),
             false,
             None,
+            start_total_changes,
         ))
     }
 
@@ -279,25 +294,23 @@ impl Database {
         mode: Option<String>,
         statements: Vec<String>,
     ) -> Result<QueryResult> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| Error::from_reason("DB Lock failed"))?;
+        let conn = self.conn.lock()?;
         let mode_str = match mode.as_deref() {
             Some("immediate") => "IMMEDIATE",
             Some("exclusive") => "EXCLUSIVE",
             _ => "DEFERRED",
         };
+        let start_total_changes = conn.total_changes();
         conn.execute(&format!("BEGIN {}", mode_str), [])
             .map_err(to_napi_error)?;
+        self.in_transaction
+            .store(true, std::sync::atomic::Ordering::SeqCst);
         for (i, sql) in statements.iter().enumerate() {
             if let Err(e) = conn.execute_batch(sql) {
                 conn.execute("ROLLBACK", []).ok();
-                let snippet = if sql.len() > 100 {
-                    format!("{}...", &sql[..100])
-                } else {
-                    sql.clone()
-                };
+                self.in_transaction
+                    .store(false, std::sync::atomic::Ordering::SeqCst);
+                let snippet = sql_snippet(sql);
                 return Err(crate::error::to_napi_error_with_context(
                     e,
                     Some(&format!("Transaction statement {} failed: {}", i, snippet)),
@@ -306,10 +319,14 @@ impl Database {
         }
         conn.execute("COMMIT", []).map_err(|e| {
             conn.execute("ROLLBACK", []).ok();
+            self.in_transaction
+                .store(false, std::sync::atomic::Ordering::SeqCst);
             to_napi_error(e)
         })?;
+        self.in_transaction
+            .store(false, std::sync::atomic::Ordering::SeqCst);
         Ok(QueryResult {
-            changes: conn.changes() as u32,
+            changes: crate::db::changes_since(&conn, start_total_changes),
             last_insert_rowid: conn.last_insert_rowid(),
         })
     }
@@ -317,10 +334,7 @@ impl Database {
     /// Load a SQLite extension
     #[napi]
     pub fn load_extension(&self, path: String) -> Result<()> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| Error::from_reason("DB Lock failed"))?;
+        let conn = self.conn.lock()?;
         unsafe {
             conn.load_extension(&path, Option::<&str>::None)
                 .map_err(to_napi_error)?;
@@ -331,10 +345,7 @@ impl Database {
     /// Serialize the database to binary format
     #[napi]
     pub fn serialize_binary(&self) -> Result<Buffer> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| Error::from_reason("DB Lock failed"))?;
+        let conn = self.conn.lock()?;
         let data = conn.serialize("main").map_err(to_napi_error)?;
         Ok(Buffer::from(data.to_vec()))
     }
@@ -342,10 +353,7 @@ impl Database {
     /// Deserialize a database from binary format
     #[napi]
     pub fn deserialize_binary(&self, data: Buffer, read_only: Option<bool>) -> Result<()> {
-        let mut conn = self
-            .conn
-            .lock()
-            .map_err(|_| Error::from_reason("DB Lock failed"))?;
+        let mut conn = self.conn.lock()?;
         let len = data.len();
         let sqlite_ptr = unsafe { rusqlite::ffi::sqlite3_malloc(len as i32) as *mut u8 };
         if sqlite_ptr.is_null() {
@@ -365,10 +373,7 @@ impl Database {
     /// Serialize the database schema to SQL statements
     #[napi]
     pub fn serialize(&self) -> Result<String> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| Error::from_reason("DB Lock failed"))?;
+        let conn = self.conn.lock()?;
         let mut stmt = conn.prepare_cached("SELECT sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY CASE WHEN type = 'table' THEN 1 WHEN type = 'index' THEN 2 ELSE 3 END, name").map_err(to_napi_error)?;
         let statements: Vec<String> = stmt
             .query_map([], |row| row.get(0))
@@ -381,10 +386,7 @@ impl Database {
     /// Deserialize a database from SQL statements
     #[napi]
     pub fn deserialize(&self, sql: String) -> Result<()> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| Error::from_reason("DB Lock failed"))?;
+        let conn = self.conn.lock()?;
         conn.execute_batch(&sql).map_err(to_napi_error)?;
         Ok(())
     }
@@ -396,10 +398,7 @@ impl Database {
     /// Get list of all tables in the database
     #[napi]
     pub fn get_tables(&self) -> Result<Vec<String>> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| Error::from_reason("DB Lock failed"))?;
+        let conn = self.conn.lock()?;
         let mut stmt = conn.prepare_cached("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name").map_err(to_napi_error)?;
         let tables: Vec<String> = stmt
             .query_map([], |row| row.get(0))
@@ -412,10 +411,7 @@ impl Database {
     /// Get column information for a table
     #[napi]
     pub fn get_columns(&self, table_name: String) -> Result<Vec<serde_json::Value>> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| Error::from_reason("DB Lock failed"))?;
+        let conn = self.conn.lock()?;
         let mut stmt = conn
             .prepare(&format!("PRAGMA table_info({})", table_name))
             .map_err(to_napi_error)?;
@@ -439,10 +435,7 @@ impl Database {
     /// Get index information for a table
     #[napi]
     pub fn get_indexes(&self, table_name: String) -> Result<Vec<serde_json::Value>> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| Error::from_reason("DB Lock failed"))?;
+        let conn = self.conn.lock()?;
         let mut stmt = conn
             .prepare(&format!("PRAGMA index_list({})", table_name))
             .map_err(to_napi_error)?;
@@ -477,10 +470,7 @@ impl Database {
     /// Get the CREATE statement for a table
     #[napi]
     pub fn get_table_sql(&self, table_name: String) -> Result<Option<String>> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| Error::from_reason("DB Lock failed"))?;
+        let conn = self.conn.lock()?;
         let mut stmt = conn
             .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?")
             .map_err(to_napi_error)?;
@@ -491,10 +481,7 @@ impl Database {
     /// Export the entire schema as SQL statements
     #[napi]
     pub fn export_schema(&self) -> Result<String> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| Error::from_reason("DB Lock failed"))?;
+        let conn = self.conn.lock()?;
         let mut stmt = conn.prepare_cached("SELECT sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY CASE WHEN type = 'table' THEN 1 WHEN type = 'index' THEN 2 ELSE 3 END, name").map_err(to_napi_error)?;
         let statements: Vec<String> = stmt
             .query_map([], |row| row.get(0))
@@ -507,10 +494,7 @@ impl Database {
     /// Check if a table exists
     #[napi]
     pub fn table_exists(&self, table_name: String) -> Result<bool> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| Error::from_reason("DB Lock failed"))?;
+        let conn = self.conn.lock()?;
         let count: i32 = conn
             .query_row(
                 "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?",
@@ -524,10 +508,7 @@ impl Database {
     /// Get database metadata
     #[napi]
     pub fn get_metadata(&self) -> Result<serde_json::Value> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| Error::from_reason("DB Lock failed"))?;
+        let conn = self.conn.lock()?;
         let table_count: i32 = conn.query_row("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'", [], |row| row.get(0)).map_err(to_napi_error)?;
         let index_count: i32 = conn.query_row("SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name NOT LIKE 'sqlite_%'", [], |row| row.get(0)).map_err(to_napi_error)?;
         let page_count: i32 = conn
@@ -547,12 +528,9 @@ impl Database {
     /// Close the database connection
     #[napi]
     pub fn close(&self) -> Result<()> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| Error::from_reason("DB Lock failed"))?;
-        conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").ok();
-        drop(conn);
+        self.conn.close()?;
+        self.in_transaction
+            .store(false, std::sync::atomic::Ordering::SeqCst);
         self.closed.store(true, std::sync::atomic::Ordering::SeqCst);
         Ok(())
     }
@@ -584,10 +562,7 @@ impl Database {
     /// Returns true if created, false if already existed
     #[napi]
     pub fn create_table_if_not_exists(&self, sql: String) -> Result<bool> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| Error::from_reason("DB Lock failed"))?;
+        let conn = self.conn.lock()?;
         let table_name = Self::extract_table_name(&sql)?;
         let exists: i32 = conn
             .query_row(
@@ -612,10 +587,7 @@ impl Database {
         column_name: String,
         column_def: String,
     ) -> Result<bool> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| Error::from_reason("DB Lock failed"))?;
+        let conn = self.conn.lock()?;
         let mut stmt = conn
             .prepare(&format!("PRAGMA table_info({})", table_name))
             .map_err(to_napi_error)?;
@@ -638,10 +610,7 @@ impl Database {
     /// Run SQL safely - returns success without throwing if table/column already exists
     #[napi]
     pub fn run_safe(&self, sql: String, ignore_errors: Option<Vec<String>>) -> Result<bool> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| Error::from_reason("DB Lock failed"))?;
+        let conn = self.conn.lock()?;
         let result = conn.execute_batch(&sql);
         match result {
             Ok(_) => Ok(true),
@@ -666,10 +635,7 @@ impl Database {
     /// Get the current schema version
     #[napi]
     pub fn get_schema_version(&self) -> Result<u32> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| Error::from_reason("DB Lock failed"))?;
+        let conn = self.conn.lock()?;
         let table_exists: i32 = conn.query_row("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = '_schema_version'", [], |row| row.get(0)).map_err(to_napi_error)?;
         if table_exists == 0 {
             return Ok(0);
@@ -688,10 +654,7 @@ impl Database {
     /// Set the schema version
     #[napi]
     pub fn set_schema_version(&self, version: u32) -> Result<()> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| Error::from_reason("DB Lock failed"))?;
+        let conn = self.conn.lock()?;
         conn.execute("CREATE TABLE IF NOT EXISTS _schema_version (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL DEFAULT (datetime('now')), description TEXT)", []).map_err(to_napi_error)?;
         conn.execute("INSERT OR REPLACE INTO _schema_version (version, description, applied_at) VALUES (?, ?, datetime('now'))", [&version.to_string(), "manual"]).map_err(to_napi_error)?;
         Ok(())
@@ -705,10 +668,7 @@ impl Database {
         version: Option<u32>,
         description: Option<String>,
     ) -> Result<u32> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| Error::from_reason("DB Lock failed"))?;
+        let conn = self.conn.lock()?;
         let ver = version.unwrap_or(1);
         conn.execute("BEGIN IMMEDIATE", []).map_err(to_napi_error)?;
         if let Err(e) = conn.execute_batch(&schema) {
@@ -728,10 +688,7 @@ impl Database {
     /// Migrate the database to a new schema version
     #[napi]
     pub fn migrate(&self, migrations: Vec<Migration>, target_version: Option<u32>) -> Result<u32> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| Error::from_reason("DB Lock failed"))?;
+        let conn = self.conn.lock()?;
         let current_version = {
             let table_exists: i32 = conn.query_row("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = '_schema_version'", [], |row| row.get(0)).unwrap_or(0);
             if table_exists == 0 {
@@ -746,7 +703,7 @@ impl Database {
             }
         };
         let mut sorted_migrations = migrations;
-        sorted_migrations.sort_by(|a, b| a.version.cmp(&b.version));
+        sorted_migrations.sort_by_key(|migration| migration.version);
         let target = target_version
             .unwrap_or_else(|| sorted_migrations.last().map(|m| m.version).unwrap_or(1));
         if current_version >= target {
@@ -797,10 +754,7 @@ impl Database {
                 )));
             }
         }
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| Error::from_reason("DB Lock failed"))?;
+        let conn = self.conn.lock()?;
         conn.create_scalar_function(
             name.as_str(),
             -1,
@@ -830,10 +784,7 @@ impl Database {
                 )));
             }
         }
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| Error::from_reason("DB Lock failed"))?;
+        let conn = self.conn.lock()?;
         conn.create_collation(name.as_str(), |a: &str, b: &str| a.cmp(b))
             .map_err(to_napi_error)?;
         let mut colls = collations
@@ -849,10 +800,7 @@ impl Database {
 
     #[napi]
     pub fn pragma(&self, name: String, value: Option<Unknown>) -> Result<serde_json::Value> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| Error::from_reason("DB Lock failed"))?;
+        let conn = self.conn.lock()?;
         if let Some(val) = value {
             let env = Env::from_raw(val.env());
             let params_container = convert_params_container(&env, Some(val))?;

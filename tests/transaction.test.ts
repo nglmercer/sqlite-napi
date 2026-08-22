@@ -33,18 +33,23 @@ describe("SQLite NAPI - Transaction Support", () => {
 
   test("Transaction.commit commits changes", () => {
     const tx = db.transaction(null);
-    db.run("INSERT INTO accounts (balance) VALUES (?)", [200]);
-    tx.commit();
+    tx.run("INSERT INTO accounts (balance) VALUES (?)", [200]);
+    tx.run("INSERT INTO accounts (balance) VALUES (?)", [300]);
+    const result = tx.commit();
+
+    expect(result.changes).toBe(2);
     
     const stmt = db.query("SELECT COUNT(*) as count FROM accounts");
     const row = stmt.get([]);
-    expect(row && (row as Record<string, unknown>).count).toBe(3);
+    expect(row && (row as Record<string, unknown>).count).toBe(4);
   });
 
   test("Transaction.rollback reverts changes", () => {
     const tx = db.transaction(null);
-    db.run("INSERT INTO accounts (balance) VALUES (?)", [200]);
-    tx.rollback();
+    tx.run("INSERT INTO accounts (balance) VALUES (?)", [200]);
+    const result = tx.rollback();
+
+    expect(result.changes).toBe(1);
     
     const stmt = db.query("SELECT COUNT(*) as count FROM accounts");
     const row = stmt.get([]);
@@ -58,7 +63,7 @@ describe("SQLite NAPI - Transaction Support", () => {
     ]);
     
     expect(result).toBeDefined();
-    expect(result.changes).toBe(1);
+    expect(result.changes).toBe(2);
     
     const stmt = db.query("SELECT COUNT(*) as count FROM accounts");
     const row = stmt.get([]);
